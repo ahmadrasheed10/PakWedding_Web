@@ -15,20 +15,20 @@ export default function Layout({ children }: LayoutProps) {
   useEffect(() => {
     // Don't check session expiry immediately - wait a bit after page load
     if (!user) return
-    
-    let interval: NodeJS.Timeout | null = null
+
+    let interval: number | null = null
     let handleVisibilityChange: (() => void) | null = null
     let handleFocus: (() => void) | null = null
-    
+
     // Wait before starting session checks to avoid interfering with login
     const initialDelay = setTimeout(() => {
       // Check session expiry every minute
       interval = setInterval(() => {
         if (user && checkSessionExpiry()) {
-          const isOnLoginPage = location.pathname === '/login' || 
-                               location.pathname === '/admin/login' || 
-                               location.pathname === '/register' || 
-                               location.pathname === '/vendor/register'
+          const isOnLoginPage = location.pathname === '/login' ||
+            location.pathname === '/admin/login' ||
+            location.pathname === '/register' ||
+            location.pathname === '/vendor/register'
           if (!isOnLoginPage) {
             alert('Your session has expired. Please log in again.')
             window.location.href = '/login'
@@ -39,10 +39,10 @@ export default function Layout({ children }: LayoutProps) {
       // Check session when page becomes visible (user switches back to tab)
       handleVisibilityChange = () => {
         if (!document.hidden && user && checkSessionExpiry()) {
-          const isOnLoginPage = location.pathname === '/login' || 
-                               location.pathname === '/admin/login' || 
-                               location.pathname === '/register' || 
-                               location.pathname === '/vendor/register'
+          const isOnLoginPage = location.pathname === '/login' ||
+            location.pathname === '/admin/login' ||
+            location.pathname === '/register' ||
+            location.pathname === '/vendor/register'
           if (!isOnLoginPage) {
             alert('Your session has expired. Please log in again.')
             window.location.href = '/login'
@@ -53,10 +53,10 @@ export default function Layout({ children }: LayoutProps) {
       // Check session when window gets focus (user clicks back into browser)
       handleFocus = () => {
         if (user && checkSessionExpiry()) {
-          const isOnLoginPage = location.pathname === '/login' || 
-                               location.pathname === '/admin/login' || 
-                               location.pathname === '/register' || 
-                               location.pathname === '/vendor/register'
+          const isOnLoginPage = location.pathname === '/login' ||
+            location.pathname === '/admin/login' ||
+            location.pathname === '/register' ||
+            location.pathname === '/vendor/register'
           if (!isOnLoginPage) {
             alert('Your session has expired. Please log in again.')
             window.location.href = '/login'
@@ -67,7 +67,7 @@ export default function Layout({ children }: LayoutProps) {
       document.addEventListener('visibilitychange', handleVisibilityChange)
       window.addEventListener('focus', handleFocus)
     }, 5000) // Wait 5 seconds before starting checks
-    
+
     return () => {
       clearTimeout(initialDelay)
       if (interval) clearInterval(interval)
@@ -80,22 +80,22 @@ export default function Layout({ children }: LayoutProps) {
   useEffect(() => {
     // Don't check if user just logged in (on dashboard pages)
     const isOnDashboard = location.pathname.includes('/dashboard')
-    const isOnLoginPage = location.pathname === '/login' || 
-                         location.pathname === '/admin/login' || 
-                         location.pathname === '/register' || 
-                         location.pathname === '/vendor/register'
-    
+    const isOnLoginPage = location.pathname === '/login' ||
+      location.pathname === '/admin/login' ||
+      location.pathname === '/register' ||
+      location.pathname === '/vendor/register'
+
     // Skip check entirely if on dashboard or login pages
     if (isOnDashboard || isOnLoginPage || !user) {
       return
     }
-    
+
     const timer = setTimeout(() => {
       if (user && checkSessionExpiry()) {
         window.location.href = '/login'
       }
     }, 5000) // Wait 5 seconds to allow login redirect and page load to complete
-    
+
     return () => clearTimeout(timer)
   }, [user, checkSessionExpiry, location.pathname])
 
