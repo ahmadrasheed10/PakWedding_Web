@@ -25,7 +25,6 @@ async def create_admin():
 
     hashed_password = hash_password(admin_password)
     
-    
     admin_user = {
         "email": admin_email,
         "full_name": admin_name,

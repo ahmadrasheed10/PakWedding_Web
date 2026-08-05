@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useSignIn, useUser, useAuth } from '@clerk/clerk-react'
 import { useAuthStore } from '../../store/authStore'
 import api from '../../services/api'
@@ -25,58 +25,23 @@ const validateEmail = (email: string): { isValid: boolean; error: string } => {
 
 export default function LoginPage() {
   const { isLoaded, signIn, setActive } = useSignIn()
-  const [alreadyRegistered, setAlreadyRegistered] = useState(false)
-  const navigate = useNavigate()
   const { user: clerkUser } = useUser()
   const { isLoaded: authLoaded, isSignedIn } = useAuth()
-
-  const authUser = useAuthStore((state) => state.user)
 
   useEffect(() => {
     if (!authLoaded) return
     
-    const checkRoleAndRedirect = async () => {
-      if (isSignedIn && clerkUser) {
-        // Clerk frontend SDK contains the most up-to-date metadata
-        const clerkRole = (clerkUser?.unsafeMetadata?.role as string) || (clerkUser?.publicMetadata?.role as string)
-        
-        let finalRole = clerkRole || authUser?.role
-        
-        // If we don't confidently have a role, fetch from backend
-        if (!finalRole || finalRole === 'user') {
-          try {
-            const token = await window.Clerk?.session?.getToken()
-            if (token) {
-              const apiBase = import.meta.env.VITE_API_URL || '/api'
-              const res = await fetch(`${apiBase}/users/me`, {
-                headers: { Authorization: `Bearer ${token}` }
-              })
-              if (res.ok) {
-                const data = await res.json()
-                finalRole = data.role
-                useAuthStore.getState().setAuth(data, token)
-              }
-            }
-          } catch (e) {
-            console.error('Failed to verify backend role', e)
-          }
-        }
-        
-        // Default to user if still unknown
-        finalRole = finalRole || 'user'
-        
-        if (finalRole === 'vendor') {
-          navigate('/vendor/dashboard')
-        } else if (finalRole === 'admin') {
-          navigate('/admin/dashboard')
-        } else {
-          navigate('/dashboard')
-        }
+    if (isSignedIn) {
+      const role = (clerkUser?.publicMetadata?.role as string) || (clerkUser?.unsafeMetadata?.role as string) || 'user'
+      if (role === 'vendor') {
+        window.location.href = '/vendor/dashboard'
+      } else if (role === 'admin') {
+        window.location.href = '/admin/dashboard'
+      } else {
+        window.location.href = '/dashboard'
       }
     }
-    
-    checkRoleAndRedirect()
-  }, [authLoaded, isSignedIn, clerkUser, navigate])
+  }, [authLoaded, isSignedIn, clerkUser])
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -157,42 +122,16 @@ export default function LoginPage() {
         await setActive({ session: result.createdSessionId })
         await waitForAuthSync()
 
-        // After waitForAuthSync, ClerkSessionSync should have updated the store
-        let user = useAuthStore.getState().user
-        if (!user) {
-           // Fallback if store is still empty
-           try {
-             const token = await window.Clerk?.session?.getToken()
-             if (token) {
-               const apiBase = import.meta.env.VITE_API_URL || '/api'
-               const res = await fetch(`${apiBase}/users/me`, {
-                 headers: { Authorization: `Bearer ${token}` }
-               })
-               if (res.ok) {
-                 const data = await res.json()
-                 useAuthStore.getState().setAuth(data, token)
-                 user = data
-               }
-             }
-           } catch (e) {
-             console.error('Failed to fetch backend user fallback', e)
-           }
-        }
-
+        const user = useAuthStore.getState().user
         if (user) {
           showSuccess(`Welcome back, ${user.full_name}!`)
-          
-          // Clerk frontend SDK contains the most up-to-date metadata
-          const clerkRole = window.Clerk?.user?.unsafeMetadata?.role as string
-          const finalRole = clerkRole || user.role
-
           setTimeout(() => {
-            if (finalRole === 'vendor') {
-              navigate('/vendor/dashboard')
-            } else if (finalRole === 'admin') {
-              navigate('/admin/dashboard')
+            if (user.role === 'vendor') {
+              window.location.href = '/vendor/dashboard'
+            } else if (user.role === 'admin') {
+              window.location.href = '/admin/dashboard'
             } else {
-              navigate('/dashboard')
+              window.location.href = '/dashboard'
             }
           }, 1000)
           return
