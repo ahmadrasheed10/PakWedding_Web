@@ -37,23 +37,14 @@ export const useAuthStore = create<AuthState>()(
         set({ user: null, token: null, loginTime: null })
       },
       checkSessionExpiry: () => {
-        const { loginTime } = get()
+        const loginTime = get().loginTime
         if (!loginTime) return false
-        
-        const now = Date.now()
-        const elapsed = now - loginTime
-        
-        // Don't expire if login was less than 5 seconds ago (to avoid immediate expiry after login)
-        if (elapsed < 5000) {
-          return false
+
+        const expired = Date.now() - loginTime > SESSION_TIMEOUT
+        if (expired) {
+          set({ user: null, token: null, loginTime: null })
         }
-        
-        if (elapsed > SESSION_TIMEOUT) {
-          // Session expired
-          get().logout()
-          return true
-        }
-        return false
+        return expired
       },
     }),
     {

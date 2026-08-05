@@ -1,108 +1,75 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useSignIn } from '@clerk/clerk-react'
 import { useAuthStore } from '../../store/authStore'
-import api from '../../services/api'
+import { getClerkErrorMessage, waitForAuthSync } from '../../utils/clerkAuth'
 
 export default function AdminLoginPage() {
+  const { isLoaded, signIn, setActive } = useSignIn()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [twoFactorCode, setTwoFactorCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
-  const setAuth = useAuthStore((state) => state.setAuth)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
 
+    if (!isLoaded || !signIn) {
+      setError('Authentication is still loading. Please try again.')
+      setLoading(false)
+      return
+    }
+
     try {
-      // Validate inputs
       if (!email || !password) {
         setError('Please enter both email and password')
         setLoading(false)
         return
       }
 
-      console.log('Attempting login with email:', email)
-      const formData = new FormData()
-      formData.append('username', email)
-      formData.append('password', password)
-
-      const apiUrl = api.defaults.baseURL || 'http://localhost:8000/api'
-      console.log('Sending login request to:', apiUrl + '/auth/login')
-      
-      const response = await api.post('/auth/login', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 10000 // 10 seconds timeout
-      })
-      console.log('Login response:', response.data)
-
-      // Check if user is admin
-      if (response.data.user.role !== 'admin') {
-        setError('Access denied. Admin credentials required.')
-        setLoading(false)
-        return
-      }
-
-      // For now, 2FA is optional - can be implemented later
       if (twoFactorCode && twoFactorCode.length < 6) {
         setError('Invalid 2FA code')
         setLoading(false)
         return
       }
 
-      // Set auth and verify token is stored
-      console.log('[ADMIN LOGIN] Setting auth with user:', response.data.user.email, 'Role:', response.data.user.role)
-      console.log('[ADMIN LOGIN] Token received:', response.data.access_token.substring(0, 20) + '...')
-      
-      setAuth(response.data.user, response.data.access_token)
-      
-      // Wait for zustand persist to save to localStorage
-      await new Promise(resolve => setTimeout(resolve, 300))
-      
-      // Verify token was stored before navigating
-      const storedToken = useAuthStore.getState().token
+      const result = await signIn.create({
+        identifier: email.trim(),
+        password,
+      })
+
+      if (result.status !== 'complete' || !result.createdSessionId) {
+        setError('Login could not be completed. Please try again.')
+        setLoading(false)
+        return
+      }
+
+      await setActive({ session: result.createdSessionId })
+      await waitForAuthSync()
+
       const storedUser = useAuthStore.getState().user
-      
-      console.log('[ADMIN LOGIN] After setAuth - Token in store:', storedToken ? storedToken.substring(0, 20) + '...' : 'MISSING')
-      console.log('[ADMIN LOGIN] After setAuth - User in store:', storedUser ? `${storedUser.email} (${storedUser.role})` : 'MISSING')
-      
-      // Also check localStorage directly
-      const lsData = localStorage.getItem('auth-storage')
-      console.log('[ADMIN LOGIN] LocalStorage content:', lsData ? 'Present' : 'Missing')
-      
+      const storedToken = useAuthStore.getState().token
+
       if (!storedToken) {
-        console.error('[ADMIN LOGIN] Token was not stored!')
         setError('Failed to save authentication. Please try again.')
         setLoading(false)
         return
       }
-      
+
       if (!storedUser || storedUser.role !== 'admin') {
-        console.error('[ADMIN LOGIN] User was not stored correctly!')
-        setError('Failed to save user data. Please try again.')
+        useAuthStore.getState().logout()
+        setError('Access denied. Admin credentials required.')
         setLoading(false)
         return
       }
-      
-      console.log('[ADMIN LOGIN] ✓ Token and user stored successfully, navigating to dashboard')
+
       navigate('/admin/dashboard')
-    } catch (err: any) {
-      console.error('Login error:', err)
-      let errorMessage = 'Login failed. Please check your credentials and try again.'
-      
-      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        errorMessage = 'Request timed out. Please check if the backend server is running on http://localhost:8000'
-      } else if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
-        errorMessage = 'Cannot connect to server. Please make sure the backend server is running on http://localhost:8000'
-      } else if (err.response?.data?.detail) {
-        errorMessage = err.response.data.detail
-      } else if (err.message) {
-        errorMessage = err.message
-      }
-      
+    } catch (err: unknown) {
+      const errorMessage = getClerkErrorMessage(err, 'Login failed. Please check your credentials and try again.')
       setError(errorMessage)
       setLoading(false)
     }
@@ -176,5 +143,3 @@ export default function AdminLoginPage() {
     </div>
   )
 }
-
-

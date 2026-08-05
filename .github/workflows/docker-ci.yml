@@ -36,4 +36,4 @@ jobs:
         tags: pakwedding-frontend:test
 
     - name: 5. Success Message
-      run: echo "🎉 Both Backend and Frontend Docker containers built successfully!"
+      run: echo " Both Backend and Frontend Docker containers built successfully!"

@@ -29,7 +29,7 @@ class VendorBase(BaseModel):
 
 
 class VendorCreate(VendorBase):
-    password: str
+    password: Optional[str] = None
 
 
 class VendorUpdate(BaseModel):

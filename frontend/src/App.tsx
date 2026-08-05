@@ -32,11 +32,14 @@ import UserReviewsPage from './pages/UserReviewsPage'
 import ContactPage from './pages/ContactPage'
 import AboutPage from './pages/AboutPage'
 
+import ClerkSessionSync from './components/ClerkSessionSync'
+
 const queryClient = new QueryClient()
 
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <ClerkSessionSync />
       <Toaster
         position="top-right"
         containerStyle={{

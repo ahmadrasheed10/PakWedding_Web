@@ -12,6 +12,45 @@ class UserService:
     
     def __init__(self, user_repository: UserRepository):
         self.user_repo = user_repository
+
+    async def get_user_by_clerk_id(self, clerk_id: str):
+        return await self.user_repo.find_by_field("clerk_id", clerk_id)
+
+    async def sync_clerk_user(self, clerk_user_data: dict):
+        """Sync a Clerk user into MongoDB. Creates or links to an existing record."""
+        # Clerk JWTs use 'sub' for the user ID; callers may also pass 'id'
+        clerk_id = clerk_user_data.get("sub") or clerk_user_data.get("id")
+        if not clerk_id:
+            return None
+
+        # Return immediately if we already have a record for this Clerk user
+        existing_user = await self.get_user_by_clerk_id(clerk_id)
+        if existing_user:
+            return existing_user
+
+        email = (clerk_user_data.get("email") or "").lower().strip()
+
+        # If a MongoDB user already exists with the same email, link the Clerk id
+        if email:
+            existing_email_user = await self.user_repo.get_by_email(email)
+            if existing_email_user:
+                await self.user_repo.update(str(existing_email_user["_id"]), {"clerk_id": clerk_id})
+                existing_email_user["clerk_id"] = clerk_id
+                return existing_email_user
+
+        role = clerk_user_data.get("role") or "user"
+        user_data = {
+            "clerk_id": clerk_id,
+            "full_name": clerk_user_data.get("full_name") or "Clerk User",
+            "email": email,
+            "role": role,
+            "is_active": True,
+            "is_admin_approved": False if role == "admin" else None,
+            "hashed_password": None,  # Clerk-only users don't have a local password
+            "created_at": clerk_user_data.get("created_at") or datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
+        return await self.user_repo.create(user_data)
     
     async def create_user(self, user_data: UserCreate) -> dict:
         existing_user = await self.user_repo.get_by_email(user_data.email)
@@ -66,16 +105,21 @@ class UserService:
         user = await self.user_repo.get_by_email(email)
         if not user:
             return None
-        
-        if not verify_password(password, user["hashed_password"]):
+
+        hashed = user.get("hashed_password")
+        # Clerk-only users have no local password — they cannot log in via this endpoint
+        if not hashed:
             return None
-        
+
+        if not verify_password(password, hashed):
+            return None
+
         if not user.get("is_active", True):
             return None
-        
+
         if user.get("role") == "admin" and user.get("is_admin_approved") is False:
             return None
-        
+
         return user
     
     async def update_password(self, user_id: str, old_password: str, new_password: str) -> Optional[dict]:
@@ -93,4 +137,3 @@ class UserService:
         }
         
         return await self.user_repo.update(user_id, update_dict)
-

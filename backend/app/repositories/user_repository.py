@@ -13,3 +13,9 @@ class UserRepository(BaseRepository):
     async def get_by_role(self, role: str, skip: int = 0, limit: int = 100):
         return await self.find_many({"role": role}, skip, limit)
 
+    async def get_by_clerk_id(self, clerk_id: str) -> Optional[dict]:
+        return await self.find_one({"clerk_id": clerk_id})
+
+    async def find_by_field(self, field: str, value) -> Optional[dict]:
+        """Find a single document matching field == value."""
+        return await self.find_one({field: value})

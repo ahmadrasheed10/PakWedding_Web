@@ -1,8 +1,9 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
+import { useSignIn, useUser, useAuth } from '@clerk/clerk-react'
 import { useAuthStore } from '../../store/authStore'
-import api from '../../services/api'
 import { showSuccess, showError } from '../../utils/toast'
+import { getClerkErrorMessage, waitForAuthSync } from '../../utils/clerkAuth'
 
 // Email validation function
 const validateEmail = (email: string): { isValid: boolean; error: string } => {
@@ -22,13 +23,29 @@ const validateEmail = (email: string): { isValid: boolean; error: string } => {
 }
 
 export default function LoginPage() {
+  const { isLoaded, signIn, setActive } = useSignIn()
+  const { user: clerkUser } = useUser()
+  const { isLoaded: authLoaded, isSignedIn } = useAuth()
+
+  useEffect(() => {
+    if (!authLoaded) return
+    // If Clerk reports the user is already signed in, redirect immediately
+    if (isSignedIn) {
+      const role = (clerkUser?.publicMetadata?.role as string) || (clerkUser?.unsafeMetadata?.role as string) || 'user'
+      if (role === 'vendor') {
+        window.location.href = '/vendor/dashboard'
+      } else if (role === 'admin') {
+        window.location.href = '/admin/dashboard'
+      } else {
+        window.location.href = '/dashboard'
+      }
+    }
+  }, [authLoaded, isSignedIn, clerkUser])
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [emailError, setEmailError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const navigate = useNavigate()
-  const setAuth = useAuthStore((state) => state.setAuth)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -36,6 +53,12 @@ export default function LoginPage() {
     setEmailError('')
     setIsSubmitting(true)
     
+    if (!isLoaded || !signIn) {
+      showError('Authentication is still loading. Please try again.')
+      setIsSubmitting(false)
+      return
+    }
+
     // Validate email format
     const emailValidation = validateEmail(email)
     if (!emailValidation.isValid) {
@@ -47,45 +70,43 @@ export default function LoginPage() {
     }
 
     try {
-      const formData = new FormData()
-      formData.append('username', email)  // OAuth2PasswordRequestForm expects 'username' field
-      formData.append('password', password)
-
-      const response = await api.post('/auth/login', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+      const result = await signIn.create({
+        identifier: email.trim(),
+        password,
       })
 
-      // Clear any old token data before setting new auth
-      console.log('[LOGIN] Setting new auth token')
-      setAuth(response.data.user, response.data.access_token)
-      
-      // Wait a moment for sessionStorage to be updated
-      await new Promise(resolve => setTimeout(resolve, 300))
-      
-      // Verify token was stored
-      const storedToken = useAuthStore.getState().token
-      if (storedToken) {
-        console.log('[LOGIN] Token stored successfully:', storedToken.substring(0, 20) + '...')
-      } else {
-        console.error('[LOGIN] Token was not stored!')
-      }
+      if (result.status === 'complete' && result.createdSessionId) {
+        await setActive({ session: result.createdSessionId })
+        await waitForAuthSync()
 
-      showSuccess(`Welcome back, ${response.data.user.full_name}!`)
+        // Try to read the user from the local auth store. If it's not yet populated,
+        const user = useAuthStore.getState().user
+        if (user) {
+          showSuccess(`Welcome back, ${user.full_name}!`)
 
-      // Redirect based on role - use window.location for immediate redirect
-      setTimeout(() => {
-        if (response.data.user.role === 'vendor') {
-          window.location.href = '/vendor/dashboard'
-        } else if (response.data.user.role === 'admin') {
-          window.location.href = '/admin/dashboard'
+          setTimeout(() => {
+            if (user.role === 'vendor') {
+              window.location.href = '/vendor/dashboard'
+            } else if (user.role === 'admin') {
+              window.location.href = '/admin/dashboard'
+            } else {
+              window.location.href = '/dashboard'
+            }
+          }, 1000)
         } else {
           window.location.href = '/dashboard'
         }
-      }, 1000)
-    } catch (err: any) {
-      const errorMsg = err.response?.data?.detail || 'Login failed. Please check your credentials.'
+        return
+      }
+
+      const errorMsg = 'Login could not be completed. Please try again.'
       showError(errorMsg)
       setError(errorMsg)
+    } catch (err: unknown) {
+      const errorMsg = getClerkErrorMessage(err, 'Login failed. Please check your credentials.')
+      showError(errorMsg)
+      setError(errorMsg)
+    } finally {
       setIsSubmitting(false)
     }
   }
@@ -115,28 +136,23 @@ export default function LoginPage() {
               className={`w-full px-3 sm:px-4 py-2.5 sm:py-3 border-2 rounded-lg focus:outline-none focus:ring-2 transition-all duration-300 text-sm sm:text-base ${
                 emailError
                   ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
-                  : 'border-gray-300 focus:ring-primary-600 focus:border-primary-600 hover:border-primary-400'
+                  : 'border-gray-300 focus:ring-primary-500 focus:border-primary-500'
               }`}
               placeholder="Enter your email"
               required
             />
             {emailError && (
-              <p className="text-red-600 text-sm mt-1">{emailError}</p>
+              <p className="mt-2 text-sm text-red-600">{emailError}</p>
             )}
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-gray-700 font-medium text-sm sm:text-base">Password</label>
-              <Link to="/forgot-password" className="text-xs sm:text-sm bg-gradient-to-r from-primary-600 via-accent-600 to-primary-600 bg-clip-text text-transparent font-semibold hover:from-primary-700 hover:via-accent-700 hover:to-primary-700 transition-all duration-300">
-                Forgot password?
-              </Link>
-            </div>
+            <label className="block text-gray-700 font-medium mb-2 text-sm sm:text-base">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 transition-all duration-300 hover:border-primary-400 text-sm sm:text-base"
+              className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all duration-300 text-sm sm:text-base"
               placeholder="Enter your password"
               required
             />
@@ -163,4 +179,3 @@ export default function LoginPage() {
     </div>
   )
 }
-

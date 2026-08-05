@@ -84,3 +84,4 @@ class BaseRepository(IRepository[T]):
             entity["_id"] = str(entity["_id"])
         return entities
 
+

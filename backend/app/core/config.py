@@ -7,9 +7,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "mongodb://localhost:27017"
     DATABASE_NAME: str = "PakWeddingDB"
     
-    SECRET_KEY: str = "your-secret-key-change-in-production"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
+    CLERK_SECRET_KEY: str = ""
+    CLERK_JWKS_URL: str = ""
+    JWT_SECRET_KEY: str = "replace_this_with_a_secure_secret"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
     
     BACKEND_CORS_ORIGINS: list = ["http://localhost:3000"]
     
@@ -28,6 +29,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"
 
 
 settings = Settings()

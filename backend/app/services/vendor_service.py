@@ -15,31 +15,49 @@ class VendorService:
         self.vendor_repo = vendor_repository
         self.user_repo = user_repository
     
-    async def register_vendor(self, vendor_data: VendorCreate) -> dict:
-        
-        
+    async def register_vendor(self, vendor_data: VendorCreate, clerk_user: Optional[dict] = None) -> dict:
         existing_user = await self.user_repo.get_by_email(vendor_data.email)
-        if existing_user:
-            raise ValueError("User with this email already exists")
-        
-        
-        strength, issues, is_valid = validate_password_strength(vendor_data.password)
-        if not is_valid:
-            error_message = "Password is too weak. " + "; ".join(issues)
-            raise ValidationException(detail=error_message)
-        
-        
-        user_dict = {
-            "email": vendor_data.email,
-            "full_name": vendor_data.contact_person,
-            "phone_number": vendor_data.phone_number,
-            "role": "vendor",
-            "hashed_password": hash_password(vendor_data.password),
-            "is_active": True,
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
-        }
-        user = await self.user_repo.create(user_dict)
+
+        if clerk_user:
+            if existing_user and str(existing_user.get("_id")) != str(clerk_user.get("_id")):
+                raise ValueError("User with this email already exists")
+
+            user = clerk_user
+            if user.get("role") != "vendor":
+                await self.user_repo.update(str(user["_id"]), {
+                    "role": "vendor",
+                    "full_name": vendor_data.contact_person,
+                    "phone_number": vendor_data.phone_number,
+                    "updated_at": datetime.utcnow(),
+                })
+                user = await self.user_repo.get_by_id(str(user["_id"]))
+        else:
+            if existing_user:
+                raise ValueError("User with this email already exists")
+
+            if not vendor_data.password:
+                raise ValueError("Password is required for vendor registration")
+
+            strength, issues, is_valid = validate_password_strength(vendor_data.password)
+            if not is_valid:
+                error_message = "Password is too weak. " + "; ".join(issues)
+                raise ValidationException(detail=error_message)
+
+            user_dict = {
+                "email": vendor_data.email,
+                "full_name": vendor_data.contact_person,
+                "phone_number": vendor_data.phone_number,
+                "role": "vendor",
+                "hashed_password": hash_password(vendor_data.password),
+                "is_active": True,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+            user = await self.user_repo.create(user_dict)
+
+        existing_vendor = await self.vendor_repo.get_by_user_id(user["_id"])
+        if existing_vendor:
+            raise ValueError("Vendor profile already exists for this account")
         
         
         vendor_dict = vendor_data.model_dump(exclude={"password"})

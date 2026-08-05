@@ -1,56 +1,28 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { useSignIn } from '@clerk/clerk-react'
 import toast from 'react-hot-toast'
-import api from '../../services/api'
 import PasswordStrengthMeter from '../../components/PasswordStrengthMeter'
+import { getClerkErrorMessage } from '../../utils/clerkAuth'
 
 export default function ResetPasswordPage() {
-  const [searchParams] = useSearchParams()
+  const { isLoaded, signIn, setActive } = useSignIn()
   const navigate = useNavigate()
-  const [token, setToken] = useState('')
+  const location = useLocation()
+  const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [verifyingToken, setVerifyingToken] = useState(true)
 
   useEffect(() => {
-    const tokenParam = searchParams.get('token')
-    if (tokenParam) {
-      setToken(tokenParam)
-      // Verify token immediately
-      verifyToken(tokenParam)
-    } else {
-      setError('Invalid reset link. Please request a new password reset.')
-      setVerifyingToken(false)
+    const stateEmail = (location.state as { email?: string } | null)?.email
+    if (stateEmail) {
+      setEmail(stateEmail)
     }
-  }, [searchParams])
-
-  const verifyToken = async (tokenToVerify: string) => {
-    try {
-      const response = await api.post('/auth/verify-reset-token', {
-        token: tokenToVerify
-      })
-
-      if (!response.data.valid) {
-        const reason = response.data.reason || 'Invalid token'
-        if (reason.includes('expired')) {
-          setError('This reset link has expired. Please request a new password reset.')
-        } else if (reason.includes('not found')) {
-          setError('Invalid reset link. Please request a new password reset.')
-        } else {
-          setError(`Reset link is invalid: ${reason}`)
-        }
-      }
-    } catch (err: any) {
-      console.error('Token verification error:', err)
-      setError('Unable to verify reset link. Please try again.')
-    } finally {
-      setVerifyingToken(false)
-    }
-  }
-
+  }, [location.state])
 
   const validatePasswordStrength = (pwd: string) => {
     const errors = []
@@ -66,7 +38,21 @@ export default function ResetPasswordPage() {
     e.preventDefault()
     setError('')
 
-    // Validate password strength
+    if (!isLoaded || !signIn) {
+      setError('Authentication is still loading. Please try again.')
+      return
+    }
+
+    if (!email.trim()) {
+      setError('Please enter your email address.')
+      return
+    }
+
+    if (!code.trim()) {
+      setError('Please enter the reset code from your email.')
+      return
+    }
+
     const passwordErrors = validatePasswordStrength(password)
     if (passwordErrors.length > 0) {
       setError(`Password must contain: ${passwordErrors.join(', ')}`)
@@ -74,7 +60,6 @@ export default function ResetPasswordPage() {
       return
     }
 
-    // Check if passwords match
     if (password !== confirmPassword) {
       setError('Passwords do not match')
       toast.error('Passwords do not match')
@@ -84,18 +69,26 @@ export default function ResetPasswordPage() {
     setLoading(true)
 
     try {
-      await api.post('/auth/reset-password', {
-        token,
-        new_password: password
+      const result = await signIn.attemptFirstFactor({
+        strategy: 'reset_password_email_code',
+        code: code.trim(),
+        password,
       })
-      setSuccess(true)
-      toast.success('Password reset successful! You can now login 🎉')
 
-      setTimeout(() => {
-        navigate('/login')
-      }, 3000)
-    } catch (err: any) {
-      const errorMsg = err.response?.data?.detail || 'Failed to reset password'
+      if (result.status === 'complete' && result.createdSessionId) {
+        await setActive({ session: result.createdSessionId })
+        setSuccess(true)
+        toast.success('Password reset successful! You can now login 🎉')
+
+        setTimeout(() => {
+          navigate('/login')
+        }, 3000)
+        return
+      }
+
+      setError('Password reset could not be completed. Please try again.')
+    } catch (err: unknown) {
+      const errorMsg = getClerkErrorMessage(err, 'Failed to reset password')
       setError(errorMsg)
       toast.error(errorMsg)
     } finally {
@@ -132,36 +125,20 @@ export default function ResetPasswordPage() {
     )
   }
 
-  if (verifyingToken) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50/30 to-red-50/20 flex items-center justify-center py-12 px-4">
-        <div className="max-w-md w-full bg-white rounded-lg shadow-xl p-8">
-          <div className="text-center">
-            <div className="w-16 h-16 border-4 border-[#D72626] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Verifying Reset Link</h2>
-            <p className="text-gray-600">
-              Please wait while we verify your password reset link...
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50/30 to-red-50/20 flex items-center justify-center py-12 px-4">
       <div className="max-w-md w-full bg-white rounded-lg shadow-xl p-8">
         <div className="text-center mb-8">
           <h2 className="text-3xl font-bold text-gray-900 mb-2">Reset Password</h2>
           <p className="text-gray-600">
-            Enter your new password below.
+            Enter the reset code from your email and your new password below.
           </p>
         </div>
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
             <p className="text-sm mb-2">{error}</p>
-            {(error.includes('expired') || error.includes('Invalid')) && (
+            {(error.includes('expired') || error.includes('Invalid') || error.includes('code')) && (
               <Link
                 to="/forgot-password"
                 className="text-sm font-semibold text-[#D72626] hover:text-red-700 underline"
@@ -174,6 +151,32 @@ export default function ResetPasswordPage() {
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
+            <label className="block text-gray-700 font-medium mb-2">Email Address</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#D72626] focus:border-transparent"
+              placeholder="Enter your email"
+              required
+              disabled={loading}
+            />
+          </div>
+
+          <div>
+            <label className="block text-gray-700 font-medium mb-2">Reset Code</label>
+            <input
+              type="text"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#D72626] focus:border-transparent"
+              placeholder="Enter code from email"
+              required
+              disabled={loading}
+            />
+          </div>
+
+          <div>
             <label className="block text-gray-700 font-medium mb-2">New Password</label>
             <input
               type="password"
@@ -183,7 +186,7 @@ export default function ResetPasswordPage() {
               placeholder="Enter new password"
               required
               minLength={8}
-              disabled={loading || !token}
+              disabled={loading}
             />
             <PasswordStrengthMeter password={password} />
           </div>
@@ -198,13 +201,13 @@ export default function ResetPasswordPage() {
               placeholder="Confirm new password"
               required
               minLength={8}
-              disabled={loading || !token}
+              disabled={loading}
             />
           </div>
 
           <button
             type="submit"
-            disabled={loading || !token}
+            disabled={loading}
             className="w-full bg-gradient-to-r from-[#D72626] to-red-600 hover:from-red-700 hover:to-red-800 text-white py-3 rounded-lg font-semibold transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Resetting...' : 'Reset Password'}

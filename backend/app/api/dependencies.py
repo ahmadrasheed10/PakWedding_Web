@@ -1,5 +1,6 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from datetime import datetime
 from app.core.database import get_db
 from app.core.security import decode_token
 from app.repositories.user_repository import UserRepository
@@ -105,12 +106,36 @@ async def get_current_user(
     if payload is None:
         print(f"[AUTH ERROR] Token decode returned None for token: {token[:20]}...")
         raise credentials_exception
-    
+
     user_id: str = payload.get("sub")
     if user_id is None:
         raise credentials_exception
-    
-    user = await user_service.get_user_by_id(user_id)
+
+    issuer = payload.get("iss", "")
+    is_clerk_token = isinstance(issuer, str) and "clerk" in issuer
+
+    user = None
+    if is_clerk_token:
+        user = await user_service.get_user_by_clerk_id(user_id)
+        if not user:
+            # Extract email: Clerk JWT may put it in different fields
+            email = payload.get("email") or ""
+            # Construct full_name from first/last name claims if present
+            first = payload.get("first_name") or ""
+            last = payload.get("last_name") or ""
+            full_name = f"{first} {last}".strip() or payload.get("name") or payload.get("full_name") or "Clerk User"
+            user_data = {
+                "sub": user_id,        # use 'sub' key so sync_clerk_user picks it up
+                "email": email,
+                "full_name": full_name,
+                "role": payload.get("role") or "user",
+                "is_active": True,
+                "created_at": datetime.utcfromtimestamp(payload["iat"]) if payload.get("iat") else datetime.utcnow(),
+            }
+            user = await user_service.sync_clerk_user(user_data)
+    else:
+        user = await user_service.get_user_by_id(user_id)
+
     if user is None:
         raise credentials_exception
     
@@ -141,3 +166,24 @@ async def get_current_vendor(current_user: dict = Depends(get_current_user)):
         )
     return current_user
 
+
+async def get_optional_current_user(
+    token: str = Depends(OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)),
+    user_service: UserService = Depends(get_user_service)
+):
+    if not token:
+        return None
+    try:
+        payload = decode_token(token)
+        if payload is None:
+            return None
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            return None
+        
+        user = await user_service.get_user_by_clerk_id(user_id)
+        if not user:
+            user = await user_service.get_user_by_id(user_id)
+        return user
+    except Exception:
+        return None

@@ -9,6 +9,9 @@ router = APIRouter()
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_profile(current_user: dict = Depends(get_current_user)):
+    # Normalize _id -> id so Pydantic UserResponse (which expects 'id') works correctly
+    if "_id" in current_user and "id" not in current_user:
+        current_user = {**current_user, "id": str(current_user["_id"])}
     return current_user
 
 

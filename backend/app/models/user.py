@@ -60,11 +60,15 @@ class UserInDB(UserBase):
         arbitrary_types_allowed = True
 
 
-class UserResponse(UserBase):
+class UserResponse(BaseModel):
     id: str
-    is_active: bool
-    created_at: datetime
-    
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    phone_number: Optional[str] = None
+    role: str = "user"
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+
     class Config:
         from_attributes = True
 

@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { useSignIn } from '@clerk/clerk-react'
 import toast from 'react-hot-toast'
-import api from '../../services/api'
+import { getClerkErrorMessage } from '../../utils/clerkAuth'
 
 // Email validation function
 const validateEmail = (email: string): { isValid: boolean; error: string } => {
@@ -21,6 +22,8 @@ const validateEmail = (email: string): { isValid: boolean; error: string } => {
 }
 
 export default function ForgotPasswordPage() {
+  const { isLoaded, signIn } = useSignIn()
+  const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [emailError, setEmailError] = useState('')
@@ -33,7 +36,12 @@ export default function ForgotPasswordPage() {
     setEmailError('')
     setLoading(true)
     
-    // Validate email format
+    if (!isLoaded || !signIn) {
+      setError('Authentication is still loading. Please try again.')
+      setLoading(false)
+      return
+    }
+
     const emailValidation = validateEmail(email)
     if (!emailValidation.isValid) {
       setEmailError(emailValidation.error)
@@ -44,11 +52,16 @@ export default function ForgotPasswordPage() {
     }
 
     try {
-      await api.post('/auth/forgot-password', { email })
+      await signIn.create({
+        strategy: 'reset_password_email_code',
+        identifier: email.trim(),
+      })
+
       setSuccess(true)
-      toast.success('Password reset link sent! Check your email 📧')
-    } catch (err: any) {
-      const errorMsg = err.response?.data?.detail || 'Failed to process request'
+      toast.success('Password reset code sent! Check your email 📧')
+      navigate('/reset-password', { state: { email: email.trim() } })
+    } catch (err: unknown) {
+      const errorMsg = getClerkErrorMessage(err, 'Failed to process request')
       setError(errorMsg)
       toast.error(errorMsg)
     } finally {
@@ -68,7 +81,7 @@ export default function ForgotPasswordPage() {
             </div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Check Your Email</h2>
             <p className="text-gray-600 mb-6">
-              If an account exists with this email, a password reset link has been sent to your inbox. Please check your email and follow the instructions to reset your password.
+              If an account exists with this email, a password reset code has been sent to your inbox. Use that code on the reset password page.
             </p>
             
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 text-left">
@@ -76,26 +89,24 @@ export default function ForgotPasswordPage() {
               <ul className="text-xs text-blue-700 space-y-1">
                 <li>• The email may take a few minutes to arrive</li>
                 <li>• Check your spam/junk folder if you don't see it</li>
-                <li>• The reset link will expire in 30 minutes</li>
+                <li>• Enter the code on the reset password page</li>
               </ul>
             </div>
 
             <div className="space-y-3">
               <Link
-                to="/login"
+                to="/reset-password"
+                state={{ email }}
                 className="block w-full bg-gradient-to-r from-[#D72626] to-red-600 hover:from-red-700 hover:to-red-800 text-white py-3 rounded-lg font-semibold transition-all shadow-md"
+              >
+                Enter Reset Code
+              </Link>
+              <Link
+                to="/login"
+                className="block w-full bg-gray-200 hover:bg-gray-300 text-gray-700 py-3 rounded-lg font-semibold transition-all"
               >
                 Back to Login
               </Link>
-              <button
-                onClick={() => {
-                  setSuccess(false)
-                  setEmail('')
-                }}
-                className="block w-full bg-gray-200 hover:bg-gray-300 text-gray-700 py-3 rounded-lg font-semibold transition-all"
-              >
-                Try Another Email
-              </button>
             </div>
           </div>
         </div>

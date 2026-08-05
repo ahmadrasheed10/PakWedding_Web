@@ -46,7 +46,20 @@ def validate_password_strength(password: str) -> Tuple[str, List[str], bool]:
         issues.append("Password is too common. Please choose a more unique password")
         score = 0
         
-    if re.search(r'(012|123|234|345|456|567|678|789|890|abc|bcd|cde|def|efg|fgh|ghi|hij|ijk|jkl|klm|lmn|mno|nop|opq|pqr|qrs|rst|stu|tuv|uvw|vwx|wxy|xyz)', password.lower()):
+    # Check for sequential characters (only 3+ consecutive in a row)
+    sequential_patterns = [
+        '012', '123', '234', '345', '456', '567', '678', '789', '890',
+        'abc', 'bcd', 'cde', 'def', 'efg', 'fgh', 'ghi', 'hij', 'ijk',
+        'jkl', 'klm', 'lmn', 'mno', 'nop', 'opq', 'pqr', 'qrs', 'rst',
+        'stu', 'tuv', 'uvw', 'vwx', 'wxy', 'xyz'
+    ]
+    found_sequential = False
+    for pattern in sequential_patterns:
+        if pattern in password.lower():
+            found_sequential = True
+            break
+    
+    if found_sequential:
         issues.append("Avoid using sequential characters")
         score = max(0, score - 1)
         

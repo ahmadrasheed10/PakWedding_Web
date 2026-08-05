@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useSignUp } from '@clerk/clerk-react'
 import api from '../../services/api'
+import { getClerkErrorMessage, splitFullName, waitForAuthSync } from '../../utils/clerkAuth'
 
 export default function VendorRegisterPage() {
+  const { isLoaded, signUp, setActive } = useSignUp()
   const [formData, setFormData] = useState({
     business_name: '',
     contact_person: '',
@@ -17,6 +20,7 @@ export default function VendorRegisterPage() {
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [alreadyRegistered, setAlreadyRegistered] = useState(false)
   const [registrationSuccess, setRegistrationSuccess] = useState(false)
   const navigate = useNavigate()
 
@@ -42,6 +46,12 @@ export default function VendorRegisterPage() {
     setError('')
     setIsSubmitting(true)
 
+    if (!isLoaded || !signUp) {
+      setError('Authentication is still loading. Please try again.')
+      setIsSubmitting(false)
+      return
+    }
+
     if (formData.password !== formData.confirm_password) {
       setError('Passwords do not match')
       setIsSubmitting(false)
@@ -49,7 +59,34 @@ export default function VendorRegisterPage() {
     }
 
     try {
-      // First register the vendor
+      const { firstName, lastName } = splitFullName(formData.contact_person)
+
+      await signUp.create({
+        emailAddress: formData.email.trim(),
+        password: formData.password,
+        firstName,
+        lastName,
+        unsafeMetadata: { 
+          role: 'vendor',
+          phone_number: formData.phone_number.trim()
+        },
+      })
+
+      if (signUp.status !== 'complete' || !signUp.createdSessionId) {
+        if (signUp.status === 'missing_requirements') {
+          await signUp.prepareEmailAddressVerification({ strategy: 'email_code' })
+          setError('Please verify your email first. Check your inbox for a verification code, then try again.')
+          setIsSubmitting(false)
+          return
+        }
+        setError('Account setup could not be completed. Please try again.')
+        setIsSubmitting(false)
+        return
+      }
+
+      await setActive({ session: signUp.createdSessionId })
+      await waitForAuthSync()
+
       const vendorData = {
         business_name: formData.business_name,
         contact_person: formData.contact_person,
@@ -57,7 +94,6 @@ export default function VendorRegisterPage() {
         phone_number: formData.phone_number,
         business_address: formData.business_address,
         service_category: formData.service_category,
-        password: formData.password
       }
 
       const registerResponse = await api.post('/vendors/register', vendorData)
@@ -77,9 +113,12 @@ export default function VendorRegisterPage() {
       }
 
       setRegistrationSuccess(true)
-      // Don't navigate immediately, show success message first
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Registration failed')
+    } catch (err: unknown) {
+      const errorMsg = getClerkErrorMessage(err, 'Registration failed')
+      setError(errorMsg)
+      if (errorMsg.toLowerCase().includes('already registered') || errorMsg.toLowerCase().includes('identifier exists') || errorMsg.toLowerCase().includes('identifier in use')) {
+        setAlreadyRegistered(true)
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -207,7 +246,10 @@ export default function VendorRegisterPage() {
               <input
                 type="email"
                 value={formData.email}
-                onChange={(e) => setFormData({...formData, email: e.target.value})}
+                onChange={(e) => {
+                  setFormData({...formData, email: e.target.value})
+                  setAlreadyRegistered(false)
+                }}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
                 placeholder="Enter email address"
                 required
@@ -289,14 +331,36 @@ export default function VendorRegisterPage() {
           </button>
         </form>
 
-        <div className="mt-6 text-center">
-          <p className="text-gray-600 text-sm">
-            Already a vendor?{' '}
-            <Link to="/login" className="text-[#D72626] font-semibold hover:text-red-700 transition-colors">
-              Login
-            </Link>
-          </p>
-        </div>
+        {alreadyRegistered ? (
+          <div className="mt-6 text-center space-y-3">
+            <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg text-sm">
+              This email is already registered with Clerk. Please login or reset your password.
+            </div>
+            <div className="flex flex-col sm:flex-row justify-center gap-3">
+              <Link
+                to="/login"
+                className="px-5 py-3 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700"
+              >
+                Login
+              </Link>
+              <Link
+                to="/forgot-password"
+                className="px-5 py-3 rounded-lg bg-gray-100 text-gray-800 font-semibold hover:bg-gray-200"
+              >
+                Forgot Password
+              </Link>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-6 text-center">
+            <p className="text-gray-600 text-sm">
+              Already a vendor?{' '}
+              <Link to="/login" className="text-[#D72626] font-semibold hover:text-red-700 transition-colors">
+                Login
+              </Link>
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )

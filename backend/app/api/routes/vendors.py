@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
-from typing import List
+from typing import List, Optional
 from app.services.vendor_service import VendorService
-from app.api.dependencies import get_vendor_service, get_current_vendor
+from app.api.dependencies import get_vendor_service, get_current_vendor, get_optional_current_user
 from app.models.vendor import VendorCreate, VendorUpdate, VendorResponse
 
 router = APIRouter()
@@ -10,10 +10,11 @@ router = APIRouter()
 @router.post("/register", response_model=VendorResponse, status_code=status.HTTP_201_CREATED)
 async def register_vendor(
     vendor_data: VendorCreate,
-    vendor_service: VendorService = Depends(get_vendor_service)
+    vendor_service: VendorService = Depends(get_vendor_service),
+    current_user: Optional[dict] = Depends(get_optional_current_user),
 ):
     try:
-        vendor = await vendor_service.register_vendor(vendor_data)
+        vendor = await vendor_service.register_vendor(vendor_data, clerk_user=current_user)
         return vendor
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
