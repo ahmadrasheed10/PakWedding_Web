@@ -6,35 +6,11 @@ import hashlib
 import os
 import base64
 from app.core.config import settings
-import asyncio
 
 # Global cache for JWKS to avoid fetching it on every request
 _jwks_cache = None
 _jwks_cache_time = None
-_jwks_lock = asyncio.Lock()
 
-async def get_jwks():
-    """Fetch the JWKS from Clerk with caching."""
-    global _jwks_cache, _jwks_cache_time
-    
-    now = datetime.now(timezone.utc)
-    if _jwks_cache and _jwks_cache_time and (now - _jwks_cache_time) < timedelta(hours=1):
-        return _jwks_cache
-        
-    async with _jwks_lock:
-        if _jwks_cache and _jwks_cache_time and (now - _jwks_cache_time) < timedelta(hours=1):
-            return _jwks_cache
-            
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(settings.CLERK_JWKS_URL)
-                response.raise_for_status()
-                _jwks_cache = response.json()
-                _jwks_cache_time = now
-                return _jwks_cache
-        except Exception as e:
-            print(f"[AUTH ERROR] Failed to fetch JWKS: {e}")
-            return None
 
 def get_jwks_sync():
     """Fetch the JWKS from Clerk in a synchronous context with caching."""
@@ -50,7 +26,7 @@ def get_jwks_sync():
         _jwks_cache_time = now
         return _jwks_cache
     except Exception as e:
-        print(f"[AUTH ERROR] Failed to fetch JWKS synchronously: {e}")
+        print(f"[AUTH ERROR] Failed to fetch JWKS: {e}")
         return None
 
 

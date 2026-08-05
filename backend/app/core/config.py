@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
+from typing import List
 
 
 class Settings(BaseSettings):
@@ -7,12 +7,21 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "mongodb://localhost:27017"
     DATABASE_NAME: str = "PakWeddingDB"
     
-    CLERK_SECRET_KEY: str = ""
-    CLERK_JWKS_URL: str = ""
-    JWT_SECRET_KEY: str = "replace_this_with_a_secure_secret"
+    CLERK_SECRET_KEY: str = "sk_test_QmG208SbFzAxQAipKP0TE2HANTS8suNd3ighSVcom0"
+    CLERK_JWKS_URL: str = "https://safe-mastiff-96.clerk.accounts.dev/.well-known/jwks.json"
+    CLERK_PUBLISHABLE_KEY: str = "pk_test_c2FmZS1tYXN0aWZmLTk2LmNsZXJrLmFjY291bnRzLmRldiQ"
+    JWT_SECRET_KEY: str = "9c4f4c95b8e63d3d77f65c0cdb5f3f8a7d8e0c2b1a6d9f4e3b7c8d1a2f5e6b9"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
     
-    BACKEND_CORS_ORIGINS: list = ["http://localhost:3000"]
+    # CORS — includes localhost for dev + all Vercel deployment URLs for production
+    BACKEND_CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "https://pak-wedding-web.vercel.app",
+        "https://pak-wedding-c8uc28n3u-thejogs.vercel.app",
+        "https://pak-wedding-web-frontend-xpc8rj3zz-thejogs.vercel.app",
+    ]
     
     CLOUDINARY_CLOUD_NAME: str = ""
     CLOUDINARY_API_KEY: str = ""
@@ -33,4 +42,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

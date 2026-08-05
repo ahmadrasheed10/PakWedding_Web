@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from app.api.routes import auth, users, vendors, bookings, admin, services, uploads, vendor_bookings, reviews, checklist, favorites
@@ -54,11 +53,18 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    await Database.connect_db()
+    try:
+        await Database.connect_db()
+    except Exception as e:
+        print(f"[STARTUP WARNING] Database connection failed: {e}")
+        # Don't crash the server — DB may connect on first request
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    await Database.close_db()
+    try:
+        await Database.close_db()
+    except Exception as e:
+        print(f"[SHUTDOWN WARNING] Database close failed: {e}")
 
 
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
@@ -80,4 +86,3 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
-
