@@ -1,11 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useSignUp } from '@clerk/clerk-react'
+import { useSignUp, useAuth, useUser } from '@clerk/clerk-react'
 import api from '../../services/api'
 import { getClerkErrorMessage, splitFullName, waitForAuthSync } from '../../utils/clerkAuth'
+import { showSuccess } from '../../utils/toast'
 
 export default function VendorRegisterPage() {
   const { isLoaded, signUp, setActive } = useSignUp()
+  const { isLoaded: authLoaded, isSignedIn } = useAuth()
+  const { user: clerkUser } = useUser()
   const [formData, setFormData] = useState({
     business_name: '',
     contact_person: '',
@@ -22,7 +25,27 @@ export default function VendorRegisterPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [alreadyRegistered, setAlreadyRegistered] = useState(false)
   const [registrationSuccess, setRegistrationSuccess] = useState(false)
+  const [pendingVerification, setPendingVerification] = useState(false)
+  const [verificationCode, setVerificationCode] = useState('')
   const navigate = useNavigate()
+
+  useEffect(() => {
+    if (!authLoaded) return
+    // Prevent redirect if we are currently registering or have successfully registered
+    if (isSubmitting || pendingVerification || registrationSuccess) return
+
+    if (isSignedIn) {
+      const role = (clerkUser?.publicMetadata?.role as string) ||
+        (clerkUser?.unsafeMetadata?.role as string) ||
+        'user'
+      const redirectUrl = role === 'vendor'
+        ? '/vendor/dashboard'
+        : role === 'admin'
+          ? '/admin/dashboard'
+          : '/dashboard'
+      navigate(redirectUrl)
+    }
+  }, [authLoaded, isSignedIn, clerkUser, navigate, isSubmitting, pendingVerification, registrationSuccess])
 
   const categories = [
     'Photographer', 'Caterer', 'Venue', 'Decorator', 
@@ -39,6 +62,35 @@ export default function VendorRegisterPage() {
       }
       reader.readAsDataURL(file)
     }
+  }
+
+  const completeRegistration = async () => {
+    if (!signUp || !signUp.createdSessionId) return;
+    
+    await setActive({ session: signUp.createdSessionId })
+    await waitForAuthSync()
+
+    const vendorData = {
+      business_name: formData.business_name,
+      contact_person: formData.contact_person,
+      email: formData.email,
+      phone_number: formData.phone_number,
+      business_address: formData.business_address,
+      service_category: formData.service_category,
+    }
+
+    const registerResponse = await api.post('/vendors/register', vendorData)
+    
+    if (imageFile && registerResponse.data) {
+      try {
+        const imageFormData = new FormData()
+        imageFormData.append('file', imageFile)
+      } catch (imgErr) {
+        console.error('Image upload failed:', imgErr)
+      }
+    }
+
+    setRegistrationSuccess(true)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -66,59 +118,60 @@ export default function VendorRegisterPage() {
         password: formData.password,
         firstName,
         lastName,
-        unsafeMetadata: { 
+        unsafeMetadata: {
           role: 'vendor',
-          phone_number: formData.phone_number.trim()
+          phone_number: formData.phone_number.trim(),
         },
       })
 
-      if (signUp.status !== 'complete' || !signUp.createdSessionId) {
-        if (signUp.status === 'missing_requirements') {
-          await signUp.prepareEmailAddressVerification({ strategy: 'email_code' })
-          setError('Please verify your email first. Check your inbox for a verification code, then try again.')
-          setIsSubmitting(false)
-          return
-        }
-        setError('Account setup could not be completed. Please try again.')
-        setIsSubmitting(false)
+      if (signUp.status === 'complete') {
+        await completeRegistration()
         return
       }
 
-      await setActive({ session: signUp.createdSessionId })
-      await waitForAuthSync()
-
-      const vendorData = {
-        business_name: formData.business_name,
-        contact_person: formData.contact_person,
-        email: formData.email,
-        phone_number: formData.phone_number,
-        business_address: formData.business_address,
-        service_category: formData.service_category,
+      if (signUp.status === 'missing_requirements') {
+        await signUp.prepareEmailAddressVerification({ strategy: 'email_code' })
+        setPendingVerification(true)
+        showSuccess('Verification code sent to your email.')
+        return
       }
-
-      const registerResponse = await api.post('/vendors/register', vendorData)
       
-      // If image is provided, upload it after registration
-      if (imageFile && registerResponse.data) {
-        try {
-          const imageFormData = new FormData()
-          imageFormData.append('file', imageFile)
-          
-          // Note: This requires vendor to be logged in, so we'll handle this in vendor dashboard
-          // For now, just register without image upload
-        } catch (imgErr) {
-          console.error('Image upload failed:', imgErr)
-          // Continue with registration even if image upload fails
-        }
-      }
-
-      setRegistrationSuccess(true)
+      setError('Account setup could not be completed. Please try again.')
     } catch (err: unknown) {
       const errorMsg = getClerkErrorMessage(err, 'Registration failed')
       setError(errorMsg)
       if (errorMsg.toLowerCase().includes('already registered') || errorMsg.toLowerCase().includes('identifier exists') || errorMsg.toLowerCase().includes('identifier in use')) {
         setAlreadyRegistered(true)
       }
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleVerifyEmail = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+
+    if (!signUp || !verificationCode.trim()) {
+      setError('Please enter the verification code from your email')
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const result = await signUp.attemptEmailAddressVerification({
+        code: verificationCode.trim(),
+      })
+
+      if (result.status === 'complete') {
+        await completeRegistration()
+        return
+      }
+
+      setError('Verification incomplete. Please check the code and try again.')
+    } catch (err: unknown) {
+      const errorMsg = getClerkErrorMessage(err, 'Verification failed')
+      setError(errorMsg)
     } finally {
       setIsSubmitting(false)
     }
@@ -213,8 +266,44 @@ export default function VendorRegisterPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {pendingVerification ? (
+          <form onSubmit={handleVerifyEmail} className="space-y-4 sm:space-y-5">
+            <p className="text-gray-600 text-sm">
+              We sent a verification code to <strong>{formData.email}</strong>. Enter it below to finish creating your vendor account.
+            </p>
+            <div>
+              <label className="block text-gray-700 font-medium mb-2 text-sm sm:text-base">Verification Code</label>
+              <input
+                type="text"
+                value={verificationCode}
+                onChange={(e) => setVerificationCode(e.target.value)}
+                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent text-sm sm:text-base"
+                placeholder="Enter 6-digit code"
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full bg-pink-600 hover:bg-pink-700 text-white py-3 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSubmitting ? 'Verifying...' : 'Verify & Complete Registration'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPendingVerification(false)
+                setVerificationCode('')
+                setError('')
+              }}
+              className="w-full text-gray-600 hover:text-gray-800 text-sm"
+            >
+              Back to registration
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div>
               <label className="block text-gray-700 font-medium mb-2">Business Name</label>
               <input
@@ -330,6 +419,7 @@ export default function VendorRegisterPage() {
             {isSubmitting ? 'Registering...' : 'Register as Vendor'}
           </button>
         </form>
+        )}
 
         {alreadyRegistered ? (
           <div className="mt-6 text-center space-y-3">

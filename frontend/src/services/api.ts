@@ -38,27 +38,23 @@ api.interceptors.request.use((config) => {
   
   const token = authStore.token
   
-  // List of public endpoints that don't require authentication
+  // Public endpoints that can be called without authentication.
+  // Any other endpoint should receive the current token if available.
   const publicEndpoints = [
     '/auth/login',
     '/auth/register',
     '/auth/check-email',
     '/auth/forgot-password',
     '/auth/reset-password',
-    '/vendors',
   ]
   
-  // Check if URL matches public endpoint pattern (e.g., /vendors or /vendors/123)
   const isPublicEndpoint = publicEndpoints.some(endpoint => {
-    if (config.url) {
-      return config.url.startsWith(endpoint) || config.url === endpoint
-    }
-    return false
+    if (!config.url) return false
+    return config.url === endpoint || config.url.startsWith(`${endpoint}/`)
   })
   
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
-    // Debug logging for checklist requests
     if (config.url?.includes('/checklist')) {
       console.log('[API] Making checklist request with token:', token.substring(0, 20) + '...')
     }
@@ -129,12 +125,13 @@ api.interceptors.response.use(
       const isFavoritesError = requestUrl.includes('/favorites')
       const isReviewsError = requestUrl.includes('/reviews')
       const isAdminError = requestUrl.includes('/admin/')
+      const isVendorsError = requestUrl.includes('/vendors/')
+      const isUsersError = requestUrl.includes('/users/')
       const isOnLoginPage = currentPath === '/login' || currentPath === '/admin/login' || currentPath === '/register' || currentPath === '/vendor/register'
       
       // Only logout if we have a token (user was logged in) and it's not an expected error
-      if (token && !isOnLoginPage && !isAuthEndpoint && !isBookingError && !isChecklistError && !isFavoritesError && !isReviewsError && !isAdminError) {
-        useAuthStore.getState().logout()
-        window.location.href = '/'
+      if (token && !isOnLoginPage && !isAuthEndpoint && !isBookingError && !isChecklistError && !isFavoritesError && !isReviewsError && !isAdminError && !isVendorsError && !isUsersError) {
+        window.location.href = '/logout'
       }
     }
     return Promise.reject(error)

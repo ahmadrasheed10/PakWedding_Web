@@ -10,7 +10,6 @@ async def create_admin():
     db = client[settings.DATABASE_NAME]
     users_collection = db["users"]
     
-    
     admin_email = "admin@pakwedding.com"
     admin_password = "admin123" 
     admin_name = "Admin User"
@@ -23,8 +22,7 @@ async def create_admin():
         print(f"Password: (the password you set when creating this admin)")
         client.close()
         return
-    
-  
+
     hashed_password = hash_password(admin_password)
     
     

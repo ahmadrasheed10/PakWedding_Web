@@ -107,10 +107,7 @@ export default function FavoritesPage() {
         
         // Token exists but request failed - likely expired or invalid
         if (errorDetail.includes('credentials') || errorDetail.includes('expired') || errorDetail.includes('invalid') || errorDetail.includes('Not authenticated')) {
-          useAuthStore.getState().logout()
-          if (!window.location.href.includes('/login')) {
-            window.location.href = '/login'
-          }
+          window.location.href = '/logout'
         } else {
           console.warn('401 error but not a credentials issue:', errorDetail)
           setLoading(false)

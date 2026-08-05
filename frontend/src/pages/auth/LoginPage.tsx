@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useSignIn, useUser, useAuth } from '@clerk/clerk-react'
 import { useAuthStore } from '../../store/authStore'
+import api from '../../services/api'
 import { showSuccess, showError } from '../../utils/toast'
 import { getClerkErrorMessage, waitForAuthSync } from '../../utils/clerkAuth'
 
@@ -24,23 +25,58 @@ const validateEmail = (email: string): { isValid: boolean; error: string } => {
 
 export default function LoginPage() {
   const { isLoaded, signIn, setActive } = useSignIn()
+  const [alreadyRegistered, setAlreadyRegistered] = useState(false)
+  const navigate = useNavigate()
   const { user: clerkUser } = useUser()
   const { isLoaded: authLoaded, isSignedIn } = useAuth()
 
+  const authUser = useAuthStore((state) => state.user)
+
   useEffect(() => {
     if (!authLoaded) return
-    // If Clerk reports the user is already signed in, redirect immediately
-    if (isSignedIn) {
-      const role = (clerkUser?.publicMetadata?.role as string) || (clerkUser?.unsafeMetadata?.role as string) || 'user'
-      if (role === 'vendor') {
-        window.location.href = '/vendor/dashboard'
-      } else if (role === 'admin') {
-        window.location.href = '/admin/dashboard'
-      } else {
-        window.location.href = '/dashboard'
+    
+    const checkRoleAndRedirect = async () => {
+      if (isSignedIn && clerkUser) {
+        // Clerk frontend SDK contains the most up-to-date metadata
+        const clerkRole = (clerkUser?.unsafeMetadata?.role as string) || (clerkUser?.publicMetadata?.role as string)
+        
+        let finalRole = clerkRole || authUser?.role
+        
+        // If we don't confidently have a role, fetch from backend
+        if (!finalRole || finalRole === 'user') {
+          try {
+            const token = await window.Clerk?.session?.getToken()
+            if (token) {
+              const apiBase = import.meta.env.VITE_API_URL || '/api'
+              const res = await fetch(`${apiBase}/users/me`, {
+                headers: { Authorization: `Bearer ${token}` }
+              })
+              if (res.ok) {
+                const data = await res.json()
+                finalRole = data.role
+                useAuthStore.getState().setAuth(data, token)
+              }
+            }
+          } catch (e) {
+            console.error('Failed to verify backend role', e)
+          }
+        }
+        
+        // Default to user if still unknown
+        finalRole = finalRole || 'user'
+        
+        if (finalRole === 'vendor') {
+          navigate('/vendor/dashboard')
+        } else if (finalRole === 'admin') {
+          navigate('/admin/dashboard')
+        } else {
+          navigate('/dashboard')
+        }
       }
     }
-  }, [authLoaded, isSignedIn, clerkUser])
+    
+    checkRoleAndRedirect()
+  }, [authLoaded, isSignedIn, clerkUser, navigate])
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -69,7 +105,49 @@ export default function LoginPage() {
       return
     }
 
+    const backendLogin = async () => {
+      const formData = new URLSearchParams()
+      formData.append('username', email.trim())
+      formData.append('password', password)
+
+      const fallbackResponse = await api.post('/auth/login', formData, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      })
+
+      const userFromBackend = fallbackResponse.data?.user
+      const tokenFromBackend = fallbackResponse.data?.access_token
+      if (!userFromBackend || !tokenFromBackend) {
+        throw new Error('Backend login did not return valid credentials.')
+      }
+
+      useAuthStore.getState().setAuth(userFromBackend, tokenFromBackend)
+      showSuccess(`Welcome back, ${userFromBackend.full_name}!`)
+      setTimeout(() => {
+        if (userFromBackend.role === 'vendor') {
+          window.location.href = '/vendor/dashboard'
+        } else if (userFromBackend.role === 'admin') {
+          window.location.href = '/admin/dashboard'
+        } else {
+          window.location.href = '/dashboard'
+        }
+      }, 1000)
+      return true
+    }
+
+    let backendErrorMessage = ''
+
     try {
+      try {
+        const backendSuccess = await backendLogin()
+        if (backendSuccess) {
+          return
+        }
+      } catch (backendErr: unknown) {
+        backendErrorMessage = (backendErr as any)?.response?.data?.detail || (backendErr as any)?.message || ''
+      }
+
       const result = await signIn.create({
         identifier: email.trim(),
         password,
@@ -79,31 +157,58 @@ export default function LoginPage() {
         await setActive({ session: result.createdSessionId })
         await waitForAuthSync()
 
-        // Try to read the user from the local auth store. If it's not yet populated,
-        const user = useAuthStore.getState().user
+        // After waitForAuthSync, ClerkSessionSync should have updated the store
+        let user = useAuthStore.getState().user
+        if (!user) {
+           // Fallback if store is still empty
+           try {
+             const token = await window.Clerk?.session?.getToken()
+             if (token) {
+               const apiBase = import.meta.env.VITE_API_URL || '/api'
+               const res = await fetch(`${apiBase}/users/me`, {
+                 headers: { Authorization: `Bearer ${token}` }
+               })
+               if (res.ok) {
+                 const data = await res.json()
+                 useAuthStore.getState().setAuth(data, token)
+                 user = data
+               }
+             }
+           } catch (e) {
+             console.error('Failed to fetch backend user fallback', e)
+           }
+        }
+
         if (user) {
           showSuccess(`Welcome back, ${user.full_name}!`)
+          
+          // Clerk frontend SDK contains the most up-to-date metadata
+          const clerkRole = window.Clerk?.user?.unsafeMetadata?.role as string
+          const finalRole = clerkRole || user.role
 
           setTimeout(() => {
-            if (user.role === 'vendor') {
-              window.location.href = '/vendor/dashboard'
-            } else if (user.role === 'admin') {
-              window.location.href = '/admin/dashboard'
+            if (finalRole === 'vendor') {
+              navigate('/vendor/dashboard')
+            } else if (finalRole === 'admin') {
+              navigate('/admin/dashboard')
             } else {
-              window.location.href = '/dashboard'
+              navigate('/dashboard')
             }
           }, 1000)
-        } else {
-          window.location.href = '/dashboard'
+          return
         }
-        return
       }
 
-      const errorMsg = 'Login could not be completed. Please try again.'
-      showError(errorMsg)
-      setError(errorMsg)
+      if (backendErrorMessage) {
+        showError(backendErrorMessage)
+        setError(backendErrorMessage)
+      } else {
+        showError('Login failed. Please check your credentials.')
+        setError('Login failed. Please check your credentials.')
+      }
     } catch (err: unknown) {
-      const errorMsg = getClerkErrorMessage(err, 'Login failed. Please check your credentials.')
+      const clerkError = getClerkErrorMessage(err, '')
+      const errorMsg = backendErrorMessage || clerkError || 'Login failed. Please check your credentials.'
       showError(errorMsg)
       setError(errorMsg)
     } finally {

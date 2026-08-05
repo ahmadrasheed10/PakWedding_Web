@@ -33,42 +33,59 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     user_service: UserService = Depends(get_user_service)
 ):
-    user_check = await user_service.user_repo.get_by_email(form_data.username)
-    if user_check:
-        from app.core.security import verify_password
-        if (user_check.get("role") == "admin" and 
-            user_check.get("is_admin_approved") is False and
-            verify_password(form_data.password, user_check["hashed_password"])):
+    try:
+        user_check = await user_service.user_repo.get_by_email(form_data.username)
+        if user_check:
+            from app.core.security import verify_password
+            hashed_pw = user_check.get("hashed_password")
+            if hashed_pw is None:
+                hashed_pw = ""
+                
+            if (user_check.get("role") == "admin" and 
+                user_check.get("is_admin_approved") is False and
+                verify_password(form_data.password, hashed_pw)):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your admin registration is pending approval. Please wait for an existing admin to approve your request.",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+        
+        user = await user_service.authenticate_user(form_data.username, form_data.password)
+        if not user:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your admin registration is pending approval. Please wait for an existing admin to approve your request.",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-    
-    user = await user_service.authenticate_user(form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
+        
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": str(user.get("_id") or user.get("id")), "role": user.get("role", "user")},
+            expires_delta=access_token_expires
         )
-    
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user["_id"], "role": user["role"]},
-        expires_delta=access_token_expires
-    )
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": {
-            "id": user["_id"],
-            "email": user["email"],
-            "full_name": user["full_name"],
-            "role": user["role"]
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": {
+                "id": str(user.get("_id") or user.get("id")),
+                "email": user.get("email", ""),
+                "full_name": user.get("full_name", "User"),
+                "role": user.get("role", "user")
+            }
         }
-    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f">>>>> [LOGIN ERROR] {type(e).__name__}: {e}")
+        traceback.print_exc()
+        logger.error(f"[LOGIN ERROR] {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Login failed: {str(e)}"
+        )
 
 
 @router.post("/check-email")

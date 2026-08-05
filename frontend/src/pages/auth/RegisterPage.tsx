@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useSignUp } from '@clerk/clerk-react'
+import { useSignUp, useAuth, useUser } from '@clerk/clerk-react'
 import { showSuccess, showError, showWarning } from '../../utils/toast'
 import PasswordStrengthMeter from '../../components/PasswordStrengthMeter'
 import { getClerkErrorMessage, splitFullName, waitForAuthSync } from '../../utils/clerkAuth'
@@ -73,6 +73,8 @@ const validateEmail = (email: string): { isValid: boolean; error: string } => {
 
 export default function RegisterPage() {
   const { isLoaded, signUp, setActive } = useSignUp()
+  const { isLoaded: authLoaded, isSignedIn } = useAuth()
+  const { user: clerkUser } = useUser()
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
@@ -89,6 +91,21 @@ export default function RegisterPage() {
   const [verificationCode, setVerificationCode] = useState('')
   const [alreadyRegistered, setAlreadyRegistered] = useState(false)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    if (!authLoaded) return
+    if (isSignedIn) {
+      const role = (clerkUser?.publicMetadata?.role as string) ||
+        (clerkUser?.unsafeMetadata?.role as string) ||
+        'user'
+      const redirectUrl = role === 'vendor'
+        ? '/vendor/dashboard'
+        : role === 'admin'
+          ? '/admin/dashboard'
+          : '/dashboard'
+      navigate(redirectUrl)
+    }
+  }, [authLoaded, isSignedIn, clerkUser, navigate])
 
   const completeRegistration = async () => {
     if (!signUp) return
@@ -151,9 +168,9 @@ export default function RegisterPage() {
         password: formData.password,
         firstName,
         lastName,
-        unsafeMetadata: { 
+        unsafeMetadata: {
           role: formData.role,
-          phone_number: formData.phone_number.trim()
+          phone_number: formData.phone_number.trim(),
         },
       })
 

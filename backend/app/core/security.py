@@ -74,7 +74,14 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     if expires_delta is None:
         expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     expire = datetime.utcnow() + expires_delta
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "iat": datetime.utcnow()})
+
+    if "sub" in to_encode and not isinstance(to_encode["sub"], str):
+        try:
+            to_encode["sub"] = str(to_encode["sub"])
+        except Exception:
+            pass
+
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm="HS256")
 
 

@@ -120,6 +120,7 @@ class UserService:
         if user.get("role") == "admin" and user.get("is_admin_approved") is False:
             return None
 
+        user["id"] = str(user["_id"])
         return user
     
     async def update_password(self, user_id: str, old_password: str, new_password: str) -> Optional[dict]:

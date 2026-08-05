@@ -1,6 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useState } from 'react'
+import { useClerk } from '@clerk/clerk-react'
 
 interface SidebarItem {
   path: string
@@ -18,11 +19,18 @@ export default function Sidebar({ items, title, userRole }: SidebarProps) {
   const location = useLocation()
   const navigate = useNavigate()
   const { logout, user } = useAuthStore()
+  const clerk = useClerk()
   const [isOpen, setIsOpen] = useState(false)
 
-  const handleLogout = () => {
-    logout()
-    navigate('/')
+  const handleLogout = async () => {
+    try {
+      if (clerk?.signOut) await clerk.signOut()
+    } catch (err) {
+      console.warn('[Sidebar] Clerk sign-out failed, clearing local session anyway:', err)
+    } finally {
+      logout()
+      navigate('/')
+    }
   }
 
   const toggleSidebar = () => {

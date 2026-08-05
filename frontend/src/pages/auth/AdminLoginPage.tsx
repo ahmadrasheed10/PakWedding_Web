@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useSignIn } from '@clerk/clerk-react'
+import { useSignIn, useClerk } from '@clerk/clerk-react'
 import { useAuthStore } from '../../store/authStore'
+import api from '../../services/api'
 import { getClerkErrorMessage, waitForAuthSync } from '../../utils/clerkAuth'
 
 export default function AdminLoginPage() {
@@ -12,6 +13,7 @@ export default function AdminLoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const clerk = useClerk()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -42,35 +44,91 @@ export default function AdminLoginPage() {
         password,
       })
 
-      if (result.status !== 'complete' || !result.createdSessionId) {
-        setError('Login could not be completed. Please try again.')
-        setLoading(false)
-        return
+      if (result.status === 'complete' && result.createdSessionId) {
+        await setActive({ session: result.createdSessionId })
+        await waitForAuthSync()
+
+        const storedUser = useAuthStore.getState().user
+        const storedToken = useAuthStore.getState().token
+
+        if (storedToken && storedUser?.role === 'admin') {
+          navigate('/admin/dashboard')
+          return
+        }
+
+        if (storedToken) {
+          try {
+            if (clerk?.signOut) await clerk.signOut()
+          } catch (err) {
+            console.warn('[AdminLoginPage] Clerk sign-out failed for non-admin user:', err)
+          }
+          useAuthStore.getState().logout()
+        }
       }
 
-      await setActive({ session: result.createdSessionId })
-      await waitForAuthSync()
+      const backendLogin = async () => {
+        const formData = new URLSearchParams()
+        formData.append('username', email.trim())
+        formData.append('password', password)
 
-      const storedUser = useAuthStore.getState().user
-      const storedToken = useAuthStore.getState().token
+        const response = await api.post('/auth/login', formData, {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        })
 
-      if (!storedToken) {
-        setError('Failed to save authentication. Please try again.')
-        setLoading(false)
-        return
+        const backendUser = response.data?.user
+        const backendToken = response.data?.access_token
+        if (backendUser && backendToken && backendUser.role === 'admin') {
+          useAuthStore.getState().setAuth(backendUser, backendToken)
+          navigate('/admin/dashboard')
+          return true
+        }
+
+        return false
       }
 
-      if (!storedUser || storedUser.role !== 'admin') {
-        useAuthStore.getState().logout()
-        setError('Access denied. Admin credentials required.')
-        setLoading(false)
-        return
+      if (isLoaded && signIn) {
+        try {
+          const result = await signIn.create({
+            identifier: email.trim(),
+            password,
+          })
+
+          if (result.status === 'complete' && result.createdSessionId) {
+            await setActive({ session: result.createdSessionId })
+            await waitForAuthSync()
+
+            const storedUser = useAuthStore.getState().user
+            const storedToken = useAuthStore.getState().token
+
+            if (storedToken && storedUser?.role === 'admin') {
+              navigate('/admin/dashboard')
+              return
+            }
+
+            if (storedToken) {
+              try {
+                if (clerk?.signOut) await clerk.signOut()
+              } catch (err) {
+                console.warn('[AdminLoginPage] Clerk sign-out failed for non-admin user:', err)
+              }
+              useAuthStore.getState().logout()
+            }
+          }
+        } catch {
+          // If Clerk admin login is unavailable or fails, fallback to backend auth
+        }
       }
 
-      navigate('/admin/dashboard')
+      const backendSuccess = await backendLogin()
+      if (!backendSuccess) {
+        setError('Admin login failed. Please check your credentials and try again.')
+      }
     } catch (err: unknown) {
       const errorMessage = getClerkErrorMessage(err, 'Login failed. Please check your credentials and try again.')
       setError(errorMessage)
+    } finally {
       setLoading(false)
     }
   }

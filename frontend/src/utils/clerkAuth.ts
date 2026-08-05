@@ -7,18 +7,31 @@ type ClerkErrorItem = {
 }
 
 export function getClerkErrorMessage(err: unknown, fallback = 'Something went wrong. Please try again.'): string {
-  if (err && typeof err === 'object' && 'errors' in err) {
-    const clerkErr = err as { errors?: ClerkErrorItem[] }
-    const first = clerkErr.errors?.[0]
-    if (first) {
-      const normalizedCode = first.code?.toString().toLowerCase() || ''
-      if (normalizedCode.includes('form_identifier_exists') || normalizedCode.includes('identifier_exists') || normalizedCode.includes('identifier_in_use')) {
-        return 'This email is already registered. Please login or reset your password.'
-      }
-      if (normalizedCode.includes('form_password_incorrect') || normalizedCode.includes('password_incorrect')) {
-        return 'Incorrect email or password. Please try again.'
-      }
-      return first.longMessage || first.message
+  const extractErrors = (source: any): ClerkErrorItem[] | undefined => {
+    if (!source || typeof source !== 'object') return undefined
+    if (Array.isArray(source.errors)) return source.errors
+    if (Array.isArray(source?.response?.data?.errors)) return source.response.data.errors
+    if (Array.isArray(source?.data?.errors)) return source.data.errors
+    return undefined
+  }
+
+  const errors = extractErrors(err)
+  if (errors?.length) {
+    const first = errors[0]
+    const normalizedCode = first.code?.toString().toLowerCase() || ''
+    if (normalizedCode.includes('form_identifier_exists') || normalizedCode.includes('identifier_exists') || normalizedCode.includes('identifier_in_use')) {
+      return 'This email is already registered. Please login or reset your password.'
+    }
+    if (normalizedCode.includes('form_password_incorrect') || normalizedCode.includes('password_incorrect')) {
+      return 'Incorrect email or password. Please try again.'
+    }
+    return first.longMessage || first.message || fallback
+  }
+
+  if (err && typeof err === 'object') {
+    const message = (err as any)?.message || (err as any)?.response?.data?.message || (err as any)?.data?.message
+    if (typeof message === 'string' && message.trim()) {
+      return message
     }
   }
 

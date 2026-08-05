@@ -66,7 +66,19 @@ export default function ClerkSessionSync() {
           console.error('[ClerkSessionSync] Error syncing Clerk session:', err)
         }
       } else if (isLoaded && !isSignedIn) {
-        logout()
+        const token = useAuthStore.getState().token
+        if (token) {
+          try {
+            const payload = JSON.parse(atob(token.split('.')[1]))
+            if (payload.iss && (payload.iss.includes('clerk') || payload.iss.includes('clerk.accounts'))) {
+              logout()
+            }
+          } catch (e) {
+            logout()
+          }
+        } else {
+          logout()
+        }
         syncedRef.current = false
       }
     }

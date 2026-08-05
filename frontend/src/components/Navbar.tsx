@@ -2,19 +2,27 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useState } from 'react'
 import { showSuccess } from '../utils/toast'
+import { useClerk } from '@clerk/clerk-react'
 
 export default function Navbar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
+  const clerk = useClerk()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const isActive = (path: string) => location.pathname === path
 
-  const handleLogout = () => {
-    logout()
-    showSuccess('Logged out successfully. See you soon!')
-    navigate('/')
-    setMobileMenuOpen(false)
+  const handleLogout = async () => {
+    try {
+      if (clerk?.signOut) await clerk.signOut()
+    } catch (err) {
+      console.warn('[Navbar] Clerk sign-out failed, clearing local session anyway:', err)
+    } finally {
+      logout()
+      showSuccess('Logged out successfully. See you soon!')
+      navigate('/')
+      setMobileMenuOpen(false)
+    }
   }
 
   return (

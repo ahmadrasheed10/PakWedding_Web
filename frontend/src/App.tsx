@@ -19,6 +19,7 @@ import VendorPackagesPage from './pages/vendor/VendorPackagesPage'
 import VendorReviewsPage from './pages/vendor/VendorReviewsPage'
 import AdminDashboard from './pages/admin/AdminDashboard'
 import AddVendorPage from './pages/admin/AddVendorPage'
+import LogoutPage from './pages/LogoutPage'
 import VendorApprovalsPage from './pages/admin/VendorApprovalsPage'
 import UserManagementPage from './pages/admin/UserManagementPage'
 import ReviewModerationPage from './pages/admin/ReviewModerationPage'
@@ -102,6 +103,7 @@ function App() {
             <Route path="/checklist" element={<ChecklistPage />} />
             <Route path="/favorites" element={<FavoritesPage />} />
             <Route path="/reviews" element={<UserReviewsPage />} />
+            <Route path="/logout" element={<LogoutPage />} />
             <Route path="/contact" element={<ContactPage />} />
             <Route path="/about" element={<AboutPage />} />
           </Routes>

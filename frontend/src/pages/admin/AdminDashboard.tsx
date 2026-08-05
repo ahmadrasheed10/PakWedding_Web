@@ -57,8 +57,8 @@ export default function AdminDashboard() {
       
       // On 401, logout and redirect (ProtectedRoute will handle redirect)
       if (error.response?.status === 401) {
-        console.error('[ADMIN DASHBOARD] Session expired, logging out')
-        logout()
+        console.error('[ADMIN DASHBOARD] Session expired, redirecting to logout')
+        window.location.href = '/logout'
       }
     } finally {
       setLoading(false)

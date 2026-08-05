@@ -284,8 +284,7 @@ export default function BrowseVendorsPage() {
       console.error('Error toggling favorite:', err)
       if (err.response?.status === 401) {
         alert('Your session has expired. Please log in again.')
-        useAuthStore.getState().logout()
-        window.location.href = '/login'
+        window.location.href = '/logout'
       } else {
         alert(err.response?.data?.detail || 'Failed to update favorite')
       }
