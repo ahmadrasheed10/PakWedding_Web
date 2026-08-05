@@ -7,7 +7,7 @@ import { showSuccess } from '../../utils/toast'
 
 export default function VendorRegisterPage() {
   const { isLoaded, signUp, setActive } = useSignUp()
-  const { isLoaded: authLoaded, isSignedIn } = useAuth()
+  const { isLoaded: authLoaded, isSignedIn, getToken } = useAuth()
   const { user: clerkUser } = useUser()
   const [formData, setFormData] = useState({
     business_name: '',
@@ -68,7 +68,29 @@ export default function VendorRegisterPage() {
     if (!signUp || !signUp.createdSessionId) return;
     
     await setActive({ session: signUp.createdSessionId })
-    await waitForAuthSync()
+    
+    // Ensure we get the token directly from Clerk.
+    // The session might take a moment to become active in the Clerk instance, so we retry.
+    let token = null;
+    let attempts = 0;
+    while (!token && attempts < 25) {
+      try {
+        // Try to get token from window.Clerk if available, otherwise fallback to useAuth's getToken
+        if (typeof window !== 'undefined' && (window as any).Clerk?.session) {
+          token = await (window as any).Clerk.session.getToken();
+        } else {
+          token = await getToken();
+        }
+      } catch (e) {
+        // ignore errors during polling
+      }
+      if (!token) {
+        await new Promise(r => setTimeout(r, 200));
+        attempts++;
+      }
+    }
+    
+    await waitForAuthSync();
 
     const vendorData = {
       business_name: formData.business_name,
@@ -79,7 +101,8 @@ export default function VendorRegisterPage() {
       service_category: formData.service_category,
     }
 
-    const registerResponse = await api.post('/vendors/register', vendorData)
+    const config = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
+    const registerResponse = await api.post('/vendors/register', vendorData, config)
     
     if (imageFile && registerResponse.data) {
       try {

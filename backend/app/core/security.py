@@ -86,7 +86,8 @@ def _decode_clerk_token(token: str) -> Optional[dict]:
             token,
             public_key,
             algorithms=["RS256"],
-            options={"verify_aud": False}
+            options={"verify_aud": False},
+            leeway=60
         )
         return payload
     except Exception as e:
@@ -105,7 +106,8 @@ def decode_token(token: str) -> Optional[dict]:
             token,
             settings.JWT_SECRET_KEY,
             algorithms=["HS256"],
-            options={"verify_aud": False}
+            options={"verify_aud": False},
+            leeway=60
         )
     except Exception as e:
         print(f"[AUTH ERROR] Local token decode failed: {e}")
