@@ -19,6 +19,7 @@ class Settings(BaseSettings):
         "http://localhost:5173",
         "http://localhost:5174",
         "https://pak-wedding-web.vercel.app",
+        "https://pak-wedding-web-frontend.vercel.app",
         "https://pak-wedding-c8uc28n3u-thejogs.vercel.app",
         "https://pak-wedding-web-frontend-xpc8rj3zz-thejogs.vercel.app",
     ]

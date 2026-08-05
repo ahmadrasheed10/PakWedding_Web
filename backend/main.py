@@ -42,9 +42,22 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": "Internal Server Error"}
     )
 
+# Explicit allowed origins (localhost dev + known production URLs)
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "https://pak-wedding-web.vercel.app",
+    "https://pak-wedding-web-frontend.vercel.app",
+    "https://pak-wedding-c8uc28n3u-thejogs.vercel.app",
+    "https://pak-wedding-web-frontend-xpc8rj3zz-thejogs.vercel.app",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=ALLOWED_ORIGINS,
+    # Also allow ANY vercel.app subdomain dynamically (covers all preview deployments)
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -57,7 +70,6 @@ async def startup_event():
         await Database.connect_db()
     except Exception as e:
         print(f"[STARTUP WARNING] Database connection failed: {e}")
-        # Don't crash the server — DB may connect on first request
 
 @app.on_event("shutdown")
 async def shutdown_event():
