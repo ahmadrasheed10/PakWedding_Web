@@ -48,7 +48,7 @@ export default function VendorRegisterPage() {
   }, [authLoaded, isSignedIn, clerkUser, navigate, isSubmitting, pendingVerification, registrationSuccess])
 
   const categories = [
-    'Photographer', 'Caterer', 'Venue', 'Decorator', 
+    'Photographer', 'Caterer', 'Venue', 'Decorator',
     'Makeup Artist', 'Music & Entertainment'
   ]
 
@@ -66,9 +66,9 @@ export default function VendorRegisterPage() {
 
   const completeRegistration = async () => {
     if (!signUp || !signUp.createdSessionId) return;
-    
+
     await setActive({ session: signUp.createdSessionId })
-    
+
     // Ensure we get the token directly from Clerk.
     // The session might take a moment to become active in the Clerk instance, so we retry.
     let token = null;
@@ -89,7 +89,7 @@ export default function VendorRegisterPage() {
         attempts++;
       }
     }
-    
+
     await waitForAuthSync();
 
     const vendorData = {
@@ -103,7 +103,7 @@ export default function VendorRegisterPage() {
 
     const config = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
     const registerResponse = await api.post('/vendors/register', vendorData, config)
-    
+
     if (imageFile && registerResponse.data) {
       try {
         const imageFormData = new FormData()
@@ -158,7 +158,7 @@ export default function VendorRegisterPage() {
         showSuccess('Verification code sent to your email.')
         return
       }
-      
+
       setError('Account setup could not be completed. Please try again.')
     } catch (err: unknown) {
       const errorMsg = getClerkErrorMessage(err, 'Registration failed')
@@ -214,11 +214,11 @@ export default function VendorRegisterPage() {
                 </svg>
               </div>
             </div>
-            
+
             <h2 className="text-3xl font-bold bg-gradient-to-r from-red-600 to-orange-600 bg-clip-text text-transparent mb-4">
               Registration Successful!
             </h2>
-            
+
             <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-6 mb-6 text-left">
               <h3 className="text-lg font-bold text-blue-900 mb-3 flex items-center gap-2">
                 <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
@@ -236,7 +236,7 @@ export default function VendorRegisterPage() {
                 <li>You can manage your profile and packages while waiting for approval</li>
               </ul>
             </div>
-            
+
             <div className="flex gap-4 justify-center">
               <button
                 onClick={() => navigate('/login')}
@@ -266,7 +266,7 @@ export default function VendorRegisterPage() {
         <p className="text-center text-gray-600 mb-8">
           Register your business and start serving customers
         </p>
-        
+
         {/* Info Banner */}
         <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
           <div className="flex">
@@ -282,7 +282,7 @@ export default function VendorRegisterPage() {
             </div>
           </div>
         </div>
-        
+
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 text-sm">
             {error}
@@ -327,121 +327,121 @@ export default function VendorRegisterPage() {
         ) : (
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div>
+                <label className="block text-gray-700 font-medium mb-2">Business Name</label>
+                <input
+                  type="text"
+                  value={formData.business_name}
+                  onChange={(e) => setFormData({ ...formData, business_name: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+                  placeholder="Enter business name"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-medium mb-2">Contact Person Name</label>
+                <input
+                  type="text"
+                  value={formData.contact_person}
+                  onChange={(e) => setFormData({ ...formData, contact_person: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+                  placeholder="Enter contact person name"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div>
+                <label className="block text-gray-700 font-medium mb-2">Email Address</label>
+                <input
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => {
+                    setFormData({ ...formData, email: e.target.value })
+                    setAlreadyRegistered(false)
+                  }}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+                  placeholder="Enter email address"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-medium mb-2">Phone Number</label>
+                <input
+                  type="tel"
+                  value={formData.phone_number}
+                  onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+                  placeholder="Enter phone number"
+                  required
+                />
+              </div>
+            </div>
+
             <div>
-              <label className="block text-gray-700 font-medium mb-2">Business Name</label>
+              <label className="block text-gray-700 font-medium mb-2">Business Address</label>
               <input
                 type="text"
-                value={formData.business_name}
-                onChange={(e) => setFormData({...formData, business_name: e.target.value})}
+                value={formData.business_address}
+                onChange={(e) => setFormData({ ...formData, business_address: e.target.value })}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                placeholder="Enter business name"
+                placeholder="Enter business address"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-gray-700 font-medium mb-2">Contact Person Name</label>
-              <input
-                type="text"
-                value={formData.contact_person}
-                onChange={(e) => setFormData({...formData, contact_person: e.target.value})}
+              <label className="block text-gray-700 font-medium mb-2">Service Category</label>
+              <select
+                value={formData.service_category}
+                onChange={(e) => setFormData({ ...formData, service_category: e.target.value })}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                placeholder="Enter contact person name"
                 required
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div>
-              <label className="block text-gray-700 font-medium mb-2">Email Address</label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => {
-                  setFormData({...formData, email: e.target.value})
-                  setAlreadyRegistered(false)
-                }}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                placeholder="Enter email address"
-                required
-              />
+              >
+                <option value="">Select a category</option>
+                {categories.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
             </div>
 
-            <div>
-              <label className="block text-gray-700 font-medium mb-2">Phone Number</label>
-              <input
-                type="tel"
-                value={formData.phone_number}
-                onChange={(e) => setFormData({...formData, phone_number: e.target.value})}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                placeholder="Enter phone number"
-                required
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div>
+                <label className="block text-gray-700 font-medium mb-2">Password</label>
+                <input
+                  type="password"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+                  placeholder="Create password"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-medium mb-2">Confirm Password</label>
+                <input
+                  type="password"
+                  value={formData.confirm_password}
+                  onChange={(e) => setFormData({ ...formData, confirm_password: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+                  placeholder="Confirm password"
+                  required
+                />
+              </div>
             </div>
-          </div>
 
-          <div>
-            <label className="block text-gray-700 font-medium mb-2">Business Address</label>
-            <input
-              type="text"
-              value={formData.business_address}
-              onChange={(e) => setFormData({...formData, business_address: e.target.value})}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              placeholder="Enter business address"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-gray-700 font-medium mb-2">Service Category</label>
-            <select
-              value={formData.service_category}
-              onChange={(e) => setFormData({...formData, service_category: e.target.value})}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              required
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full bg-pink-600 hover:bg-pink-700 text-white py-3 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <option value="">Select a category</option>
-              {categories.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div>
-              <label className="block text-gray-700 font-medium mb-2">Password</label>
-              <input
-                type="password"
-                value={formData.password}
-                onChange={(e) => setFormData({...formData, password: e.target.value})}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                placeholder="Create password"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-gray-700 font-medium mb-2">Confirm Password</label>
-              <input
-                type="password"
-                value={formData.confirm_password}
-                onChange={(e) => setFormData({...formData, confirm_password: e.target.value})}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                placeholder="Confirm password"
-                required
-              />
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full bg-pink-600 hover:bg-pink-700 text-white py-3 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isSubmitting ? 'Registering...' : 'Register as Vendor'}
-          </button>
-        </form>
+              {isSubmitting ? 'Registering...' : 'Register as Vendor'}
+            </button>
+          </form>
         )}
 
         {alreadyRegistered ? (
