@@ -43,21 +43,16 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 # Explicit allowed origins (localhost dev + known production URLs)
-ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "https://pak-wedding-web.vercel.app",
-    "https://pak-wedding-web-frontend.vercel.app",
-    "https://pak-wedding-c8uc28n3u-thejogs.vercel.app",
-    "https://pak-wedding-web-frontend-xpc8rj3zz-thejogs.vercel.app",
+ALLOWED_ORIGINS = settings.BACKEND_CORS_ORIGINS + [
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    # Also allow ANY vercel.app subdomain dynamically (covers all preview deployments)
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    # Also allow any localhost/127.0.0.1 port and any Vercel preview deployment.
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$|https://.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
