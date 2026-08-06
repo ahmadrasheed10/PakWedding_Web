@@ -4,10 +4,7 @@ import { ClerkProvider } from '@clerk/clerk-react'
 import App from './App'
 import './index.css'
 
-console.log("testingg");
-
-
-console.log("helllo");
+console.log("===================Deployment Pipeline Testing======================")
 
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
