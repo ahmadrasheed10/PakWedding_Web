@@ -91,7 +91,6 @@ async def update_vendors_with_packages():
                     ]
                 }
             ]
-            
             # Update vendor with packages
             await vendor_repo.update(vendor_id, {"packages": packages})
             print(f"[OK] Updated {vendor.get('business_name')} ({service_category}) with packages")

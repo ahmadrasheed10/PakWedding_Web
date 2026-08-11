@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import List
+import os
 
 
 class Settings(BaseSettings):
@@ -37,6 +38,7 @@ class Settings(BaseSettings):
     SMTP_FROM_EMAIL: str = ""
     SMTP_FROM_NAME: str = "PakWedding Portal"
     FRONTEND_URL: str = "http://localhost:3000"
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY")
     
     class Config:
         env_file = ".env"

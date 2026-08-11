@@ -1,8 +1,8 @@
-import { Link } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '../../store/authStore'
 import api from '../../services/api'
 import Sidebar from '../../components/Sidebar'
+import Chatbot from '../../components/Chatbot'
 
 interface DashboardStats {
   bookings: number
@@ -158,6 +158,7 @@ export default function UserDashboard() {
           </div>
         </div>
       </div>
+      <Chatbot />
     </div>
   )
 }
