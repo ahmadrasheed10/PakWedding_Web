@@ -14,6 +14,7 @@ interface ChatResponse {
   collected_info?: any
   expected_field?: string | null
   data?: any[]
+  session_id?: string
 }
 
 export default function Chatbot() {
@@ -27,6 +28,9 @@ export default function Chatbot() {
   const [expectedField, setExpectedField] = useState<string | null>(null)
   const [vendorResults, setVendorResults] = useState<any[]>([])
   const [showCategorySelection, setShowCategorySelection] = useState(true)
+  const [showSidebar, setShowSidebar] = useState(false)
+  const [sessions, setSessions] = useState<any[]>([])
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const user = useAuthStore((state) => state.user)
@@ -42,6 +46,44 @@ export default function Chatbot() {
     { id: 'Mehndi', name: 'Mehndi', icon: '' },
     { id: 'Videography', name: 'Videography', icon: '' },
   ]
+
+  const fetchSessions = async () => {
+    try {
+      const response = await api.get('/chatbot/sessions')
+      setSessions(response.data.sessions || [])
+    } catch (error) {
+      console.error('Error fetching sessions:', error)
+    }
+  }
+
+  const loadSession = async (sessionId: string) => {
+    try {
+      const response = await api.get(`/chatbot/sessions/${sessionId}`)
+      const session = response.data
+      const sessionMessages = session.messages.map((msg: any) => ({
+        role: msg.role,
+        content: msg.content
+      }))
+      setMessages(sessionMessages)
+      setCurrentSessionId(sessionId)
+      setShowCategorySelection(false)
+      setShowSidebar(false)
+    } catch (error) {
+      console.error('Error loading session:', error)
+    }
+  }
+
+  const deleteSession = async (sessionId: string) => {
+    try {
+      await api.delete(`/chatbot/sessions/${sessionId}`)
+      await fetchSessions()
+      if (currentSessionId === sessionId) {
+        handleNewChat()
+      }
+    } catch (error) {
+      console.error('Error deleting session:', error)
+    }
+  }
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -70,12 +112,17 @@ export default function Chatbot() {
         message: `I'm looking for ${category}`,
         conversation_history: conversationHistory,
         collected_info: { category },
-        expected_field: null
+        expected_field: null,
+        session_id: currentSessionId
       })
 
       const data: ChatResponse = response.data
       const assistantMessage: Message = { role: 'assistant', content: data.response }
       setMessages(prev => [...prev, assistantMessage])
+
+      if (data.session_id) {
+        setCurrentSessionId(data.session_id)
+      }
 
       setCollectedInfo(data.collected_info || {})
       setExpectedField(data.expected_field ?? null)
@@ -83,15 +130,11 @@ export default function Chatbot() {
       if (data.type === 'vendor_results' && data.vendors?.length) {
         setVendorResults(data.vendors)
       } else {
-        // Any response that isn't a fresh set of vendor results (e.g. an
-        // "I couldn't find any vendors in Kashmir, which city instead?"
-        // question) must not leave the previous search's cards on screen —
-        // those cards belong to a search that no longer applies.
         setVendorResults([])
       }
+      await fetchSessions()
       
     } catch (error) {
-      
       console.error('Error sending message:', error)
       const errorMessage: Message = { 
         role: 'assistant', 
@@ -110,6 +153,24 @@ export default function Chatbot() {
     setVendorResults([])
   }
 
+  const handleNewChat = () => {
+    setMessages([
+      { role: 'assistant', content: 'Hi! I\'m your wedding planning assistant. I can help you find vendors, check your bookings, reviews, and favorites. How can I assist you today?' }
+    ])
+    setCollectedInfo({})
+    setExpectedField(null)
+    setVendorResults([])
+    setShowCategorySelection(true)
+    setCurrentSessionId(null)
+    setShowSidebar(false)
+  }
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchSessions()
+    }
+  }, [isOpen])
+
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return
 
@@ -117,9 +178,6 @@ export default function Chatbot() {
     setMessages(prev => [...prev, userMessage])
     setInputValue('')
     setIsLoading(true)
-    // Clear the previous search's vendor cards immediately — they belong
-    // to the old query and shouldn't linger while we wait for (or in case
-    // we never get) a fresh vendor_results response for this message.
     setVendorResults([])
 
     try {
@@ -132,12 +190,17 @@ export default function Chatbot() {
         message: inputValue,
         conversation_history: conversationHistory,
         collected_info: collectedInfo,
-        expected_field: expectedField
+        expected_field: expectedField,
+        session_id: currentSessionId
       })
 
       const data: ChatResponse = response.data
       const assistantMessage: Message = { role: 'assistant', content: data.response }
       setMessages(prev => [...prev, assistantMessage])
+
+      if (data.session_id) {
+        setCurrentSessionId(data.session_id)
+      }
 
       setCollectedInfo(data.collected_info || {})
       setExpectedField(data.expected_field ?? null)
@@ -147,6 +210,7 @@ export default function Chatbot() {
       } else {
         setVendorResults([])
       }
+      await fetchSessions()
     } catch (error) {
       console.error('Error sending message:', error)
       const errorMessage: Message = { 
@@ -154,9 +218,11 @@ export default function Chatbot() {
         content: 'Sorry, I encountered an error. Please try again.' 
       }
       setMessages(prev => [...prev, errorMessage])
-    } finally {
+    } 
+    finally {
       setIsLoading(false)
     }
+
   }
 
   useEffect(() => {
@@ -164,6 +230,7 @@ export default function Chatbot() {
         inputRef.current?.focus()
     }
   }, [isLoading, isOpen])
+
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -195,17 +262,32 @@ export default function Chatbot() {
         <div className="fixed bottom-6 right-6 z-50 w-96 h-[500px] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border-2 border-[#D72626]/20">
           <div className="bg-gradient-to-r from-[#D72626] to-[#F26D46] text-white p-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="text-2xl"></span>
+              <button
+                onClick={() => setShowSidebar(!showSidebar)}
+                className="text-white hover:bg-white/20 rounded-full p-1 transition-colors"
+                title="Chat history"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
               <h3 className="font-bold">Wedding Assistant</h3>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={handleNewChat}
+                className="bg-white text-[#D72626] rounded-full px-3 py-1.5 transition-colors text-sm font-bold shadow-md hover:bg-gray-100"
+                title="New chat"
+              >
+                New Chat
+              </button>
               {!showCategorySelection && (
                 <button
                   onClick={handleResetCategory}
                   className="text-white hover:bg-white/20 rounded-full p-1 transition-colors text-xs"
                   title="Change category"
                 >
-                  🔄  
+                  🔄
                 </button>
               )}
               <button
@@ -218,6 +300,58 @@ export default function Chatbot() {
               </button>
             </div>
           </div>
+
+          {showSidebar && (
+            <div className="border-b border-gray-200 bg-white p-3">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-semibold text-gray-700">Chat History</h4>
+                <button
+                  onClick={() => setShowSidebar(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {sessions.length === 0 ? (
+                  <p className="text-xs text-gray-500">No previous chats</p>
+                ) : (
+                  sessions.map((session: any) => (
+                    <div
+                      key={session._id}
+                      className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${
+                        currentSessionId === session._id
+                          ? 'bg-[#D72626]/10 text-[#D72626]'
+                          : 'hover:bg-gray-100'
+                      }`}
+                      onClick={() => loadSession(session._id)}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate">{session.title}</p>
+                        <p className="text-xs text-gray-500">
+                          {new Date(session.updated_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          deleteSession(session._id)
+                        }}
+                        className="text-gray-400 hover:text-red-500 ml-2"
+                        title="Delete chat"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
             {showCategorySelection && (

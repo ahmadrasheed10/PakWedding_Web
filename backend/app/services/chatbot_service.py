@@ -6,6 +6,7 @@ from app.repositories.vendor_repository import VendorRepository
 from app.repositories.booking_repository import BookingRepository
 from app.repositories.review_repository import ReviewRepository
 from app.repositories.favorite_repository import FavoriteRepository
+from app.repositories.chat_session_repository import ChatSessionRepository
 from bson import ObjectId
 from bson.errors import InvalidId
 import json
@@ -23,13 +24,15 @@ class ChatbotService:
         vendor_repo: VendorRepository,
         booking_repo: BookingRepository,
         review_repo: ReviewRepository,
-        favorite_repo: FavoriteRepository
+        favorite_repo: FavoriteRepository,
+        chat_session_repo: ChatSessionRepository
     ):
         
         self.vendor_repo = vendor_repo
         self.booking_repo = booking_repo
         self.review_repo = review_repo
         self.favorite_repo = favorite_repo
+        self.chat_session_repo = chat_session_repo
         
         self.groq_enabled = bool(settings.GROQ_API_KEY)
         if self.groq_enabled:
@@ -91,8 +94,9 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
         message: str,
         conversation_history: List[Dict[str, str]],
         user_id: str,
-        collected_info: Optional[Dict[str, Any]] = None,
-        expected_field: Optional[str] = None
+        collected_info: Dict[str, Any] = {},
+        expected_field: Optional[str] = None,
+        session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Process a chat message and return response.
 
@@ -117,6 +121,23 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
         messages.append({"role": "user", "content": message})
         
         intent = self._classify_intent(message, conversation_history)
+
+        # Create new session if none provided
+        if not session_id:
+            # Generate title from first message
+            title = message[:50] + "..." if len(message) > 50 else message
+            session_id = await self.chat_session_repo.create(
+                user_id=user_id,
+                title=title,
+                messages=[{"role": "user", "content": message, "timestamp": datetime.utcnow().isoformat()}]
+            )
+        else:
+            # Update existing session with new message
+            current_session = await self.chat_session_repo.get_by_id(session_id)
+            if current_session:
+                existing_messages = current_session.get("messages", [])
+                existing_messages.append({"role": "user", "content": message, "timestamp": datetime.utcnow().isoformat()})
+                await self.chat_session_repo.update(session_id, existing_messages)
 
         if self._is_closing_remark(message):
             intent = "general"
@@ -148,20 +169,31 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
             intent = "vendor_search"
 
         if intent == "vendor_search":
-            return await self._handle_vendor_search(
+            result = await self._handle_vendor_search(
                 message, user_id, collected_info, expected_field
             )
         elif intent == "bookings":
-            return await self._handle_bookings_query(user_id)
+            result = await self._handle_bookings_query(user_id)
         elif intent == "reviews":
-            return await self._handle_reviews_query(user_id)
+            result = await self._handle_reviews_query(user_id)
         elif intent == "favorites":
-            return await self._handle_favorites_query(user_id)
+            result = await self._handle_favorites_query(user_id)
         elif intent == "list_locations":
-            return await self._handle_list_locations(message)
+            result = await self._handle_list_locations(message)
         else:
             # General conversation
-            return await self._general_chat(messages)
+            result = await self._general_chat(messages)
+        
+        # Save assistant response to session
+        if session_id and result.get("response"):
+            current_session = await self.chat_session_repo.get_by_id(session_id)
+            if current_session:
+                existing_messages = current_session.get("messages", [])
+                existing_messages.append({"role": "assistant", "content": result.get("response"), "timestamp": datetime.utcnow().isoformat()})
+                await self.chat_session_repo.update(session_id, existing_messages)
+        
+        result["session_id"] = session_id
+        return result
     
     def _is_closing_remark(self, message: str) -> bool:
         """True if the whole message is just a thanks/acknowledgement/
@@ -1090,10 +1122,7 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
         return {
             "response": f"{category_text} are available in:\n{city_list}",
             "type": "list_locations",
-            # "data" is expected to be a list of dicts (same shape as
-            # bookings/reviews/favorites/vendors) by the API's ChatResponse
-            # model — a plain list of strings failed Pydantic validation
-            # and 500'd every single successful response from this handler.
+            
             "data": [{"city": c} for c in cities]
         }
 
