@@ -121,7 +121,27 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
         if self._is_closing_remark(message):
             intent = "general"
 
-        elif intent in ("bookings", "reviews", "favorites"):
+        elif (
+            intent == "list_locations"
+            and expected_field is not None
+            and not re.search(r"\b(?:show|list|what|which|all|available|located)\b", message.lower())
+        ):
+            # The bot is actively waiting on SOME slot-filling answer
+            # (city, budget, location, date, or rating — not just city),
+            # and this message doesn't actually read like a "list all
+            # cities" request (no query-style words) — treat it as an
+            # attempt to answer the pending question instead. Previously
+            # this only covered expected_field == "city", so a reply like
+            # "aove budget and cities" sent while the bot was waiting on
+            # BUDGET fell through and got hijacked into a city listing
+            # instead of being treated as (a garbled attempt at) an
+            # answer. A message like "show me all cities in pak wedding"
+            # clearly IS a genuine locations request even with an answer
+            # technically pending, so this guard still only fires for
+            # ambiguous replies, not real listing requests.
+            intent = "vendor_search"
+
+        elif intent in ("bookings", "reviews", "favorites", "list_locations"):
             pass
 
         elif collected_info or expected_field:
@@ -137,6 +157,8 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
             return await self._handle_reviews_query(user_id)
         elif intent == "favorites":
             return await self._handle_favorites_query(user_id)
+        elif intent == "list_locations":
+            return await self._handle_list_locations(message)
         else:
             # General conversation
             return await self._general_chat(messages)
@@ -155,11 +177,45 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
             "ok thanks", "okay thanks", "thanks a lot", "thank you so much",
             "appreciate it", "hi", "hello", "hey"
         }
-        return cleaned in closing_phrases
+        if cleaned in closing_phrases:
+            return True
+
+        # Typo/spacing tolerance (e.g. "than u", "thnku", "thnks") — same
+        # fuzzy-matching approach already used elsewhere in this file for
+        # cities/categories. Without this, a typo'd thanks like "than u"
+        # falls through to vendor_search and gets treated as a new city
+        # query instead of an acknowledgement.
+        if difflib.get_close_matches(cleaned, closing_phrases, n=1, cutoff=0.75):
+            return True
+
+        return False
 
     def _classify_intent(self, message: str, history: List[Dict[str, str]]) -> str:
         """Classify the user's intent"""
         message_lower = message.lower()
+
+        # Any mention of "city"/"cities" as a standalone word (e.g. "show
+        # me cities", "list cities", "what cities", "all cities") is
+        # almost always asking for the real locations list, not answering
+        # a specific-city question — a legitimate city-name answer like
+        # "Lahore" never contains the literal word "city"/"cities". This
+        # is intentionally broad because narrower phrasing-specific
+        # patterns kept missing real variants and letting them fall
+        # through to general LLM chat, which then hallucinated a city
+        # list not grounded in the real database at all.
+        if re.search(r'\bcit(?:y|ies)\b', message_lower):
+            return "list_locations"
+
+        # A bare "in <place>" message (e.g. "in kashmir ?") with nothing
+        # else in it is almost always a follow-up asking about vendor
+        # availability in that place — but it doesn't contain any
+        # category/vendor keyword, so without this check it fell through
+        # to general LLM chat, which has no grounding in real data and can
+        # hallucinate cities/vendors that don't actually exist in the DB.
+        # Routing it into vendor_search instead lets the existing
+        # unrecognized-city handling answer from real data.
+        if re.fullmatch(r"in\s+[a-zA-Z\s]{3,}\??", message_lower.strip()):
+            return "vendor_search"
 
         for synonyms in self.category_synonyms.values():
             if any(word in message_lower for word in synonyms):
@@ -227,6 +283,56 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
         else:
             self._extract_vendor_info(message, info, expected_field)
 
+        # If this turn's category switch (or explicit "same as before")
+        # auto-carried over filters from the previous search, surface
+        # that in a short note prepended to whatever we end up replying
+        # with below — question, no-results, or results — so the user
+        # can see (and correct) what got reused instead of it happening
+        # silently.
+        auto_reused_fields = info.pop("_auto_reused", None)
+        note = self._format_reused_note(auto_reused_fields, info) if auto_reused_fields else ""
+
+        def with_note(result: Dict[str, Any]) -> Dict[str, Any]:
+            if note:
+                result["response"] = note + result["response"]
+            return result
+
+        # An unrecognized city-change attempt (e.g. "in kashmir") was
+        # flagged during extraction but deliberately NOT written into
+        # info["city"] — handle it now, before falling through to a
+        # search that would silently reuse the old city and make it look
+        # like the new one was searched.
+        unrecognized_city = info.pop("_unrecognized_city_attempt", None)
+        if unrecognized_city:
+            # This only ever fires when a city was already set and the
+            # user's phrasing ("in kashmir") read as an attempt to CHANGE
+            # it, not add to it. Without clearing the old city here, the
+            # next valid answer (e.g. "in multan") lands on the
+            # multi-city-append logic below (meant for "Lahore or
+            # Karachi" style answers to a *fresh* city question) and gets
+            # appended onto the stale old city instead of replacing it —
+            # silently returning results for both cities.
+            info["city"] = []
+            available = await self._get_available_cities(info.get("category"))
+            if available:
+                city_list = "\n".join(f"- {c}" for c in available)
+                message_text = (
+                    f"I couldn't find any vendors in {unrecognized_city}. "
+                    f"Currently, vendors are available in:\n{city_list}\n\n"
+                    f"Would you like me to search one of these instead?"
+                )
+            else:
+                message_text = (
+                    f"I couldn't find any vendors in {unrecognized_city}. "
+                    f"Which city would you like to search instead?"
+                )
+            return with_note({
+                "response": message_text,
+                "type": "question",
+                "collected_info": info,
+                "expected_field": "city"
+            })
+
         missing_field = self._get_missing_vendor_info(info)
 
         if missing_field:
@@ -239,12 +345,12 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
                 question = self._generate_invalid_input_question(missing_field)
             else:
                 question = self._generate_question_for_missing_info(missing_field, info)
-            return {
+            return with_note({
                 "response": question,
                 "type": "question",
                 "collected_info": info,
                 "expected_field": missing_field
-            }
+            })
 
         # All required info gathered — search, with diagnostics if empty
         vendors, diagnostic = await self._search_vendors(info)
@@ -254,33 +360,63 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
                 field = diagnostic["stage"]
                 value = diagnostic["suggested_value"]
                 info["_pending_suggestion"] = {"field": field, "value": value}
-                return {
+                return with_note({
                     "response": diagnostic["message"],
                     "type": "no_results",
                     "collected_info": info,
                     "expected_field": field
-                }
+                })
 
             message_text = diagnostic["message"] if diagnostic else (
                 "I couldn't find any vendors matching your criteria. "
                 "Would you like to adjust your budget, city, or other requirements?"
             )
-            return {
+            return with_note({
                 "response": message_text,
                 "type": "no_results",
                 "collected_info": info,
                 "expected_field": None
-            }
+            })
 
         response = self._format_vendor_results(vendors, info)
 
-        return {
+        return with_note({
             "response": response,
             "type": "vendor_results",
             "vendors": self._jsonable(vendors),
             "collected_info": info,
             "expected_field": None
-        }
+        })
+
+    def _format_reused_note(self, reused_fields: List[str], info: Dict[str, Any]) -> str:
+        """Build a short, transparent note describing which filters were
+        auto-carried over from a previous search, so reuse never happens
+        invisibly. Returns "" if there's nothing meaningful to report."""
+        labels = []
+        for field in reused_fields:
+            if field == "city":
+                cities = info.get("city") or []
+                if cities:
+                    labels.append(f"city: {', '.join(cities)}")
+            elif field == "budget":
+                budget = info.get("budget")
+                if budget:
+                    labels.append(f"budget: PKR {budget:,.0f}")
+            elif field == "location":
+                loc = info.get("location")
+                if loc and loc != "Any":
+                    labels.append(f"location: {loc}")
+            elif field == "date":
+                date = info.get("date")
+                if date and date != "Flexible":
+                    labels.append(f"date: {date}")
+            elif field == "min_rating":
+                rating = info.get("min_rating")
+                if rating:
+                    labels.append(f"min rating: {rating}+")
+        if not labels:
+            return ""
+        return f"(Reusing your previous search filters — {', '.join(labels)}.)\n\n"
 
     def _extract_vendor_info(
         self,
@@ -337,8 +473,107 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
             
             if new_category and new_category != info.get("category"):
                 print(f" Category changed from {info.get('category')} to {new_category} - resetting collected info")
+                # Save what was collected for the previous search before
+                # wiping it out, so a phrase like "same city" / "with
+                # above cities, ratings etc" can reapply it to the new
+                # category instead of forcing the user through every
+                # question again from scratch.
+                last_search = {
+                    "city": info.get("city"),
+                    "_city_asked": info.get("_city_asked", bool(info.get("city"))),
+                    "budget": info.get("budget"),
+                    "_budget_asked": info.get("_budget_asked", info.get("budget") is not None),
+                    "location": info.get("location"),
+                    "_location_asked": info.get("_location_asked", bool(info.get("location"))),
+                    "date": info.get("date"),
+                    "_date_asked": info.get("_date_asked", bool(info.get("date"))),
+                    "min_rating": info.get("min_rating"),
+                    "_rating_asked": info.get("_rating_asked", info.get("min_rating") is not None),
+                }
                 info.clear()
                 info["category"] = new_category
+                info["_last_search"] = last_search
+
+                # Auto-remember context: by default, silently carry the
+                # previous search's filters into the new category instead
+                # of forcing the user to retype "same city" / "with above
+                # described" every time they switch category mid-
+                # conversation (e.g. "now photographer" right after
+                # finishing a DJ search should reuse that DJ search's
+                # city/budget/date/rating, not re-ask everything). Any
+                # field the user ALSO mentions in this same message will
+                # still overwrite it below via the normal per-field
+                # parsing that runs after this block, so this only fills
+                # in what the current message didn't already say.
+                asked_flag_names = {
+                    "city": "_city_asked", "budget": "_budget_asked",
+                    "location": "_location_asked", "date": "_date_asked",
+                    "min_rating": "_rating_asked",
+                }
+                auto_reused = []
+                for field, asked_key in asked_flag_names.items():
+                    value = last_search.get(field)
+                    if value not in (None, [], ""):
+                        info[field] = value
+                        if last_search.get(asked_key):
+                            info[asked_key] = True
+                        auto_reused.append(field)
+                if auto_reused:
+                    info["_auto_reused"] = auto_reused
+                    print(f"[CHATBOT DEBUG] Auto-carried over previous search context: {auto_reused}")
+
+                # The pending question this message was originally meant
+                # to answer belonged to the OLD category and no longer
+                # applies now that the category itself just changed —
+                # without this, the per-field parsing below still treats
+                # this message as answering that stale question, and its
+                # fallback "just capture the whole message" branches
+                # (city/location/etc.) end up swallowing a message like
+                # "I'm looking for Photography" whole into a field like
+                # location.
+                expected_field = None
+
+        # --- reuse context from the previous search, if asked ---
+        # e.g. "with above cities, ratings etc", "same as before", "use
+        # the same filters" after switching to a new category. Checked
+        # before the per-field parsing below so a phrase like this doesn't
+        # fall through to being stored as a literal (garbage) city name.
+        reuse_phrase_hit = bool(re.search(
+            r'\b(same|above|previous|last time|earlier|as before|like before)\b', message_lower
+        ))
+        if not reuse_phrase_hit and info.get("_last_search"):
+            # Typo tolerance: "aove budget and cities" (meant "above")
+            # was silently missing the exact-word regex above and falling
+            # through to be treated as garbage input instead of a reuse
+            # request. Fuzzy-match individual tokens against the same
+            # keyword set, same approach already used for category/city
+            # matching elsewhere in this method.
+            reuse_keywords = ["same", "above", "previous", "earlier", "before"]
+            for token in re.findall(r"[a-z]+", message_lower):
+                if len(token) < 4:
+                    continue
+                if difflib.get_close_matches(token, reuse_keywords, n=1, cutoff=0.75):
+                    reuse_phrase_hit = True
+                    break
+
+        if info.get("_last_search") and reuse_phrase_hit:
+            snapshot = info.pop("_last_search")
+            asked_flag_names = {
+                "city": "_city_asked", "budget": "_budget_asked",
+                "location": "_location_asked", "date": "_date_asked",
+                "min_rating": "_rating_asked",
+            }
+            reused = []
+            for field, asked_key in asked_flag_names.items():
+                info[field] = snapshot.get(field)
+                if snapshot.get(asked_key):
+                    info[asked_key] = True
+                if snapshot.get(field) not in (None, [], ""):
+                    reused.append(field)
+            if reused:
+                info["_auto_reused"] = reused
+            print(f"[CHATBOT DEBUG] Reused previous search context: {reused}")
+            return
 
         # --- city (supports more than one, e.g. "Lahore or Karachi") ---
         skip_words_city = ("any", "skip", "no preference", "none", "all", "everywhere")
@@ -376,6 +611,19 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
                 else:
                     info["city"] = list(dict.fromkeys((info.get("city") or []) + [message.strip().title()]))
                     print(f"[CHATBOT DEBUG] Stored unknown city from user: {message.strip().title()}")
+            elif expected_field != "city":
+                # The city question was already answered, and this message
+                # doesn't mention any city we recognize — but if it clearly
+                # LOOKS like an attempt to change the city (e.g. "in
+                # kashmir"), don't just silently ignore it and re-run the
+                # search against the old city. That previously caused
+                # "in kashmir" to quietly keep returning Lahore results,
+                # since nothing about that message ever touched info["city"].
+                city_intent_match = re.search(r'\b(?:in|at|near|from)\s+([a-zA-Z]{3,})\b', message_lower)
+                if city_intent_match:
+                    candidate = city_intent_match.group(1).title()
+                    info["_unrecognized_city_attempt"] = candidate
+                    print(f"[CHATBOT DEBUG] Unrecognized city attempt: {candidate}")
 
         # --- budget ---
         skip_words_budget = ("skip", "any", "no limit", "no budget", "flexible")
@@ -401,8 +649,14 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
             info["location"] = "Any"
             info["_location_asked"] = True
         else:
+            # NOTE: deliberately does NOT include "venue" as a trigger
+            # word. "venue" is also a vendor category, so a message like
+            # "find me venue in lahore" would otherwise match "venue in
+            # lahore" here and silently set location="Lahore" from the
+            # *category* sentence — which is what caused the location
+            # question to be skipped/mis-filled during Venue searches.
             location_match = re.search(
-                r'(?:location|area|venue|place)\s*(?:is|:|in)?\s*([a-zA-Z\s]+)', message_lower
+                r'(?:\blocation\b|\barea\b|\bplace\b)\s*(?:is|:|in)?\s*([a-zA-Z\s]+)', message_lower
             )
             if location_match and location_match.group(1).strip():
                 info["location"] = location_match.group(1).strip().title()
@@ -434,9 +688,17 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
             info["min_rating"] = None
             info["_rating_asked"] = True
         else:
-            rating_match = re.search(
-                r'(?:rating|rated|stars?)\s*(?:of|:|above|>=|\+)?\s*(\d+(?:\.\d+)?)', message_lower
-            ) or re.search(r'(\d+(?:\.\d+)?)\s*(?:stars?|\+)', message_lower)
+            rating_match = (
+                re.search(r'(?:rating|rated|stars?)\s*(?:of|:|above|>=|\+)?\s*(\d+(?:\.\d+)?)', message_lower)
+                or re.search(r'(\d+(?:\.\d+)?)\s*(?:stars?|\+)', message_lower)
+                # "5 rating" / "of 5 rating" / "exact 5 rating" — number
+                # comes BEFORE the word "rating"/"rated", not after. The
+                # two patterns above only ever matched the number coming
+                # after "rating" (or after a star/plus), so a reply like
+                # "of 5 rating" silently matched nothing at all and the
+                # previously collected rating value never got updated.
+                or re.search(r'(\d+(?:\.\d+)?)\s*(?:rating|rated)\b', message_lower)
+            )
             if rating_match:
                 try:
                     rating = float(rating_match.group(1))
@@ -549,6 +811,25 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
         }
         return questions.get(field, "I couldn't understand that. Could you try again?")
     
+    async def _get_available_cities(self, category: Optional[str] = None) -> List[str]:
+        """Return the sorted, deduplicated list of known Pakistani cities
+        that actually have at least one approved+active vendor, optionally
+        restricted to a category. Always a real query against the data —
+        never a hardcoded city list — so this stays correct as vendors are
+        added, approved, or removed."""
+        query = {"is_approved": True, "is_active": True}
+        if category:
+            query["service_category"] = {"$regex": f"^{re.escape(category.strip())}$", "$options": "i"}
+
+        vendors = await self.vendor_repo.find_many(query, skip=0, limit=500)
+        found = set()
+        for vendor in vendors:
+            address = (vendor.get("business_address") or "").lower()
+            for city in self.pakistani_cities:
+                if re.search(rf"\b{re.escape(city)}\b", address):
+                    found.add(city.capitalize())
+        return sorted(found)
+
     async def _search_vendors(
         self, info: Dict[str, Any]
     ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
@@ -687,7 +968,7 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
                     "message": message,
                     "suggested_value": max_rating if max_rating else None
                 }
-
+            
         event_date = info.get("date")
         if event_date and event_date not in ("Flexible",) and vendors:
             try:
@@ -780,6 +1061,41 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
             return {"user_id": {"$in": [user_id, ObjectId(user_id)]}}
         except (InvalidId, TypeError):
             return {"user_id": user_id}
+
+    async def _handle_list_locations(self, message: str) -> Dict[str, Any]:
+        """Handle 'what cities have venues?' / 'which cities have
+        photographers?' style questions. Optionally scoped to a category
+        if one is mentioned in the message; otherwise covers all
+        categories. Always backed by a real query — see
+        _get_available_cities — never a hardcoded list."""
+        message_lower = message.lower()
+        category = None
+        for cat, synonyms in self.category_synonyms.items():
+            if any(word in message_lower for word in synonyms):
+                category = cat
+                break
+
+        cities = await self._get_available_cities(category)
+
+        if not cities:
+            category_text = f" for {category}" if category else ""
+            return {
+                "response": f"I couldn't find any approved vendors{category_text} yet.",
+                "type": "list_locations",
+                "data": []
+            }
+
+        category_text = f"{category} vendors" if category else "Vendors"
+        city_list = "\n".join(f"- {c}" for c in cities)
+        return {
+            "response": f"{category_text} are available in:\n{city_list}",
+            "type": "list_locations",
+            # "data" is expected to be a list of dicts (same shape as
+            # bookings/reviews/favorites/vendors) by the API's ChatResponse
+            # model — a plain list of strings failed Pydantic validation
+            # and 500'd every single successful response from this handler.
+            "data": [{"city": c} for c in cities]
+        }
 
     async def _handle_bookings_query(self, user_id: str) -> Dict[str, Any]:
         """Handle user bookings query"""

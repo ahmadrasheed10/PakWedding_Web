@@ -82,7 +82,11 @@ export default function Chatbot() {
 
       if (data.type === 'vendor_results' && data.vendors?.length) {
         setVendorResults(data.vendors)
-      } else if (data.type !== 'question') {
+      } else {
+        // Any response that isn't a fresh set of vendor results (e.g. an
+        // "I couldn't find any vendors in Kashmir, which city instead?"
+        // question) must not leave the previous search's cards on screen —
+        // those cards belong to a search that no longer applies.
         setVendorResults([])
       }
       
@@ -113,6 +117,10 @@ export default function Chatbot() {
     setMessages(prev => [...prev, userMessage])
     setInputValue('')
     setIsLoading(true)
+    // Clear the previous search's vendor cards immediately — they belong
+    // to the old query and shouldn't linger while we wait for (or in case
+    // we never get) a fresh vendor_results response for this message.
+    setVendorResults([])
 
     try {
       const conversationHistory = messages.map(msg => ({
@@ -136,7 +144,7 @@ export default function Chatbot() {
 
       if (data.type === 'vendor_results' && data.vendors?.length) {
         setVendorResults(data.vendors)
-      } else if (data.type !== 'question') {
+      } else {
         setVendorResults([])
       }
     } catch (error) {
