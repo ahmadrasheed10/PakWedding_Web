@@ -17,6 +17,7 @@ from app.services.vendor_stats_service import VendorStatsService
 from app.services.review_service import ReviewService
 from app.services.checklist_service import ChecklistService
 from app.services.favorite_service import FavoriteService
+from app.services.chatbot_service import ChatbotService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
