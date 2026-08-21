@@ -3,11 +3,8 @@ import { useEffect, useState } from 'react'
 import { useAuthStore } from '../../store/authStore'
 import api from '../../services/api'
 import Sidebar from '../../components/Sidebar'
-<<<<<<< Updated upstream
-=======
-import Chatbot from '../../components/Chatbot'
+
 import MessageNotification from '../../components/MessageNotification'
->>>>>>> Stashed changes
 
 interface DashboardStats {
   bookings: number

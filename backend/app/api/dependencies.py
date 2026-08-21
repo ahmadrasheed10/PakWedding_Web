@@ -17,8 +17,6 @@ from app.services.vendor_stats_service import VendorStatsService
 from app.services.review_service import ReviewService
 from app.services.checklist_service import ChecklistService
 from app.services.favorite_service import FavoriteService
-<<<<<<< Updated upstream
-=======
 from app.services.chatbot_service import ChatbotService
 import httpx
 from app.core.config import settings
@@ -96,7 +94,6 @@ async def _get_or_sync_clerk_user(user_id: str, payload: dict, user_service: Use
         "created_at": datetime.utcfromtimestamp(payload["iat"]) if payload.get("iat") else datetime.utcnow(),
     }
     return await user_service.sync_clerk_user(user_data)
->>>>>>> Stashed changes
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
