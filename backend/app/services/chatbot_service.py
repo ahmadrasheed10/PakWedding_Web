@@ -23,13 +23,15 @@ class ChatbotService:
         vendor_repo: VendorRepository,
         booking_repo: BookingRepository,
         review_repo: ReviewRepository,
-        favorite_repo: FavoriteRepository
+        favorite_repo: FavoriteRepository,
+        chat_session_repo = None
     ):
         
         self.vendor_repo = vendor_repo
         self.booking_repo = booking_repo
         self.review_repo = review_repo
         self.favorite_repo = favorite_repo
+        self.chat_session_repo = chat_session_repo
         
         self.groq_enabled = bool(settings.GROQ_API_KEY)
         if self.groq_enabled:
@@ -60,7 +62,12 @@ class ChatbotService:
 
         self.pakistani_cities = [
             "karachi", "lahore", "islamabad", "rawalpindi", "faisalabad",
-            "multan", "peshawar", "quetta", "sialkot", "gujranwala"
+            "multan", "peshawar", "quetta", "sialkot", "gujranwala",
+            "kashmir", "hyderabad", "sukkur", "larkana", "nawabshah",
+            "abbottabad", "mardan", "swat", "mingora", "kohat",
+            "dera ghazi khan", "bahawalpur", "sahiwal", "okara", "sheikhupura",
+            "jhang", "sargodha", "rahim yar khan", "gujrat", "sialkot",
+            "mirpur", "muzaffarabad", "gilgit", "skardu", "chitral"
         ]
 
         self.required_fields_order = ["city", "budget", "location", "date", "min_rating"]
@@ -92,7 +99,8 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
         conversation_history: List[Dict[str, str]],
         user_id: str,
         collected_info: Optional[Dict[str, Any]] = None,
-        expected_field: Optional[str] = None
+        expected_field: Optional[str] = None,
+        session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Process a chat message and return response.
 
@@ -148,20 +156,42 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
             intent = "vendor_search"
 
         if intent == "vendor_search":
-            return await self._handle_vendor_search(
+            result = await self._handle_vendor_search(
                 message, user_id, collected_info, expected_field
             )
         elif intent == "bookings":
-            return await self._handle_bookings_query(user_id)
+            result = await self._handle_bookings_query(user_id)
         elif intent == "reviews":
-            return await self._handle_reviews_query(user_id)
+            result = await self._handle_reviews_query(user_id)
         elif intent == "favorites":
-            return await self._handle_favorites_query(user_id)
+            result = await self._handle_favorites_query(user_id)
         elif intent == "list_locations":
-            return await self._handle_list_locations(message)
+            result = await self._handle_list_locations(message)
         else:
             # General conversation
-            return await self._general_chat(messages)
+            result = await self._general_chat(messages)
+        
+        # Store chat session if session repo is available
+        if self.chat_session_repo:
+            try:
+                # Add user message and assistant response to conversation history
+                updated_history = conversation_history.copy()
+                updated_history.append({"role": "user", "content": message})
+                updated_history.append({"role": "assistant", "content": result.get("response", "")})
+                
+                if session_id:
+                    # Update existing session
+                    await self.chat_session_repo.update(session_id, updated_history)
+                    result["session_id"] = session_id
+                else:
+                    # Create new session with first message as title
+                    title = message[:50] + "..." if len(message) > 50 else message
+                    new_session_id = await self.chat_session_repo.create(user_id, title, updated_history)
+                    result["session_id"] = new_session_id
+            except Exception as e:
+                print(f"[CHATBOT] Failed to store chat session: {e}")
+        
+        return result
     
     def _is_closing_remark(self, message: str) -> bool:
         """True if the whole message is just a thanks/acknowledgement/
@@ -823,11 +853,16 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
 
         vendors = await self.vendor_repo.find_many(query, skip=0, limit=500)
         found = set()
+        
         for vendor in vendors:
-            address = (vendor.get("business_address") or "").lower()
-            for city in self.pakistani_cities:
-                if re.search(rf"\b{re.escape(city)}\b", address):
-                    found.add(city.capitalize())
+            address = vendor.get("business_address") or ""
+            if address:
+                address_lower = address.lower()
+                # Check for known cities in the address
+                for known_city in self.pakistani_cities:
+                    if re.search(rf"\b{re.escape(known_city)}\b", address_lower):
+                        found.add(known_city.capitalize())
+        
         return sorted(found)
 
     async def _search_vendors(

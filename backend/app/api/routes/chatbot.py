@@ -50,7 +50,13 @@ async def get_chatbot_service(
 ):
     try:
         chat_session_repo = ChatSessionRepository(db)
-        return ChatbotService(vendor_repo, booking_repo, review_repo, favorite_repo, chat_session_repo)
+        return ChatbotService(
+            vendor_repo,
+            booking_repo,
+            review_repo,
+            favorite_repo,
+            chat_session_repo
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

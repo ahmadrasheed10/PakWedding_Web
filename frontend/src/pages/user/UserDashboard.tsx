@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { useAuthStore } from '../../store/authStore'
 import api from '../../services/api'
 import Sidebar from '../../components/Sidebar'
-
+import Chatbot from '../../components/Chatbot'
 import MessageNotification from '../../components/MessageNotification'
 
 interface DashboardStats {
@@ -162,7 +162,9 @@ export default function UserDashboard() {
 
           </div>
         </div>
+        
       </div>
+      <Chatbot/>
     </div>
   )
 }
