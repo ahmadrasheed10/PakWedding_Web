@@ -210,7 +210,9 @@ export default function BookingHistoryPage() {
                         {booking.vendor_name || 'Vendor'}
                       </h3>
                       <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(booking.status)}`}>
-                        {booking.status}
+                        {booking.status} {
+                          
+                        }
                       </span>
                     </div>
                     <div className="grid md:grid-cols-3 gap-4 text-sm text-gray-600">

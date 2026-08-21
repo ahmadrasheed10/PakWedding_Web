@@ -3,6 +3,7 @@ import { useAuthStore } from '../../store/authStore'
 import { useState, useEffect } from 'react'
 import { getVendorProfile } from '../../services/vendorService'
 import Sidebar from '../../components/Sidebar'
+import MessageNotification from '../../components/MessageNotification'
 
 export default function VendorDashboard() {
   const { user } = useAuthStore()
@@ -10,6 +11,7 @@ export default function VendorDashboard() {
   const sidebarItems = [
     { path: '/vendor/dashboard', label: 'Dashboard', icon: '📊' },
     { path: '/vendor/bookings', label: 'Bookings', icon: '📅' },
+    { path: '/vendor/messages', label: 'Messages', icon: '💬' },
     { path: '/vendor/profile', label: 'Profile', icon: '👤' },
     { path: '/vendor/packages', label: 'Packages', icon: '📦' },
     { path: '/vendor/reviews', label: 'Reviews', icon: '⭐' },
@@ -54,6 +56,8 @@ export default function VendorDashboard() {
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-amber-50 via-orange-50/30 to-red-50/20">
       <Sidebar items={sidebarItems} title="Vendor Dashboard" />
+
+      <MessageNotification />
       
       <div className="flex-1 flex flex-col pt-16 lg:pt-0">
         {/* Header */}

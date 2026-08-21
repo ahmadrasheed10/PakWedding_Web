@@ -2,7 +2,11 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+<<<<<<< Updated upstream
 from app.api.routes import auth, users, vendors, bookings, admin, services, uploads, vendor_bookings, reviews, checklist, favorites
+=======
+from app.api.routes import auth, users, vendors, bookings, admin, services, uploads, vendor_bookings, reviews, checklist, favorites, chatbot, chat
+>>>>>>> Stashed changes
 from app.core.config import settings
 from app.core.database import Database
 
@@ -85,6 +89,11 @@ app.include_router(vendor_bookings.router, prefix="/api/vendor", tags=["Vendor B
 app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews"])
 app.include_router(checklist.router, prefix="/api/checklist", tags=["Checklist"])
 app.include_router(favorites.router, prefix="/api/favorites", tags=["Favorites"])
+<<<<<<< Updated upstream
+=======
+app.include_router(chatbot.router, prefix="/api/chatbot", tags=["Chatbot"])
+app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
+>>>>>>> Stashed changes
 
 @app.get("/")
 async def root():

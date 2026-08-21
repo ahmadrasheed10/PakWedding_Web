@@ -23,8 +23,20 @@ const api = axios.create({
 
 // Add token to requests
 api.interceptors.request.use((config) => {
+  // IMPORTANT: If the caller has explicitly set their own Authorization header
+  // (e.g. VendorRegisterPage passes a fresh Clerk token after email verification),
+  // skip ALL auth-store logic and send the request as-is.
+  const hasAuth = config.headers && (
+    config.headers.Authorization ||
+    config.headers.authorization ||
+    (typeof config.headers.has === 'function' && (config.headers.has('Authorization') || config.headers.has('authorization')))
+  );
+  if (hasAuth) {
+    return config
+  }
+
   const authStore = useAuthStore.getState()
-  
+
   // Check if session has expired
   if (authStore.checkSessionExpiry()) {
     // Session expired, redirect to login
@@ -35,11 +47,12 @@ api.interceptors.request.use((config) => {
     }
     return Promise.reject(new Error('Session expired'))
   }
-  
+
   const token = authStore.token
-  
+
   // Public endpoints that can be called without authentication.
   // Any other endpoint should receive the current token if available.
+
   const publicEndpoints = [
     '/auth/login',
     '/auth/register',
@@ -47,12 +60,12 @@ api.interceptors.request.use((config) => {
     '/auth/forgot-password',
     '/auth/reset-password',
   ]
-  
+
   const isPublicEndpoint = publicEndpoints.some(endpoint => {
     if (!config.url) return false
     return config.url === endpoint || config.url.startsWith(`${endpoint}/`)
   })
-  
+
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
     if (config.url?.includes('/checklist')) {
@@ -62,43 +75,43 @@ api.interceptors.request.use((config) => {
     // Only warn for protected endpoints that require authentication
     console.warn('No token found in auth store for request:', config.url)
   }
-  
+
   // Ensure trailing slash for POST requests to root endpoints to avoid redirect issues
   // FastAPI redirects /api/bookings to /api/bookings/, which loses Authorization header
-  if (config.method === 'post' && config.url && 
-      config.url.endsWith('/bookings') && 
-      !config.url.endsWith('/')) {
+  if (config.method === 'post' && config.url &&
+    config.url.endsWith('/bookings') &&
+    !config.url.endsWith('/')) {
     config.url = config.url + '/'
   }
-  
+
   // Ensure trailing slash for POST requests to checklist endpoint
-  if (config.method === 'post' && config.url && 
-      config.url.endsWith('/checklist') && 
-      !config.url.endsWith('/')) {
+  if (config.method === 'post' && config.url &&
+    config.url.endsWith('/checklist') &&
+    !config.url.endsWith('/')) {
     config.url = config.url + '/'
   }
-  
+
   // Ensure trailing slash for GET requests to checklist endpoint (FastAPI may redirect)
-  if (config.method === 'get' && config.url && 
-      config.url === '/checklist' && 
-      !config.url.endsWith('/')) {
+  if (config.method === 'get' && config.url &&
+    config.url === '/checklist' &&
+    !config.url.endsWith('/')) {
     config.url = config.url + '/'
   }
-  
+
   // Ensure trailing slash for POST requests to favorites endpoint (FastAPI may redirect)
-  if (config.method === 'post' && config.url && 
-      config.url.endsWith('/favorites') && 
-      !config.url.endsWith('/')) {
+  if (config.method === 'post' && config.url &&
+    config.url.endsWith('/favorites') &&
+    !config.url.endsWith('/')) {
     config.url = config.url + '/'
   }
-  
+
   // Ensure trailing slash for GET requests to favorites endpoint (FastAPI may redirect)
-  if (config.method === 'get' && config.url && 
-      config.url === '/favorites' && 
-      !config.url.endsWith('/')) {
+  if (config.method === 'get' && config.url &&
+    config.url === '/favorites' &&
+    !config.url.endsWith('/')) {
     config.url = config.url + '/'
   }
-  
+
   return config
 })
 
@@ -110,7 +123,7 @@ api.interceptors.response.use(
       const currentPath = window.location.pathname
       const requestUrl = error.config?.url || ''
       const token = useAuthStore.getState().token
-      
+
       // Don't logout if:
       // 1. Already on login/register pages
       // 2. Error is from auth endpoints (login, register, etc.)
@@ -127,10 +140,11 @@ api.interceptors.response.use(
       const isAdminError = requestUrl.includes('/admin/')
       const isVendorsError = requestUrl.includes('/vendors/')
       const isUsersError = requestUrl.includes('/users/')
+      const isChatError = requestUrl.includes('/chat')
       const isOnLoginPage = currentPath === '/login' || currentPath === '/admin/login' || currentPath === '/register' || currentPath === '/vendor/register'
-      
+
       // Only logout if we have a token (user was logged in) and it's not an expected error
-      if (token && !isOnLoginPage && !isAuthEndpoint && !isBookingError && !isChecklistError && !isFavoritesError && !isReviewsError && !isAdminError && !isVendorsError && !isUsersError) {
+      if (token && !isOnLoginPage && !isAuthEndpoint && !isBookingError && !isChecklistError && !isFavoritesError && !isReviewsError && !isAdminError && !isVendorsError && !isUsersError && !isChatError) {
         window.location.href = '/logout'
       }
     }

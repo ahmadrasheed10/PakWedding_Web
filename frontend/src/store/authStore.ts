@@ -27,10 +27,10 @@ export const useAuthStore = create<AuthState>()(
       token: null,
       loginTime: null,
       setAuth: (user, token) => {
-        set({ 
-          user, 
-          token, 
-          loginTime: Date.now() 
+        set({
+          user,
+          token,
+          loginTime: Date.now()
         })
       },
       logout: () => {

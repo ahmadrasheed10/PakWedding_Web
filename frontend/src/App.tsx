@@ -32,6 +32,7 @@ import FavoritesPage from './pages/FavoritesPage'
 import UserReviewsPage from './pages/UserReviewsPage'
 import ContactPage from './pages/ContactPage'
 import AboutPage from './pages/AboutPage'
+import MessagesPage from './pages/chat/MessagesPage'
 
 import ClerkSessionSync from './components/ClerkSessionSync'
 
@@ -91,6 +92,7 @@ function App() {
             <Route path="/vendor/profile" element={<VendorManageProfilePage />} />
             <Route path="/vendor/packages" element={<VendorPackagesPage />} />
             <Route path="/vendor/reviews" element={<VendorReviewsPage />} />
+            <Route path="/vendor/messages" element={<MessagesPage />} />
             <Route path="/admin/dashboard" element={<AdminDashboard />} />
             <Route path="/admin/vendors/add" element={<AddVendorPage />} />
             <Route path="/admin/vendors" element={<VendorApprovalsPage />} />
@@ -102,6 +104,7 @@ function App() {
             <Route path="/budget-planner" element={<BudgetPlannerPage />} />
             <Route path="/checklist" element={<ChecklistPage />} />
             <Route path="/favorites" element={<FavoritesPage />} />
+            <Route path="/messages" element={<MessagesPage />} />
             <Route path="/reviews" element={<UserReviewsPage />} />
             <Route path="/logout" element={<LogoutPage />} />
             <Route path="/contact" element={<ContactPage />} />

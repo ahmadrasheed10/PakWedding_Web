@@ -287,6 +287,7 @@ export default function BookingModal({ vendorId, vendorName, isOpen, onClose, on
               name="event_date"
               value={formData.event_date}
               onChange={handleChange}
+              min={new Date(new Date().getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#D72626] focus:border-[#D72626]"
               required
             />

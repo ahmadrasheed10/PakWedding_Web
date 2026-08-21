@@ -28,35 +28,80 @@ async def register(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
+@router.post("/register-admin")
+async def register_admin(
+    user_data: UserCreate,
+    user_service: UserService = Depends(get_user_service)
+):
+    """Register admin user after Clerk signup - creates/updates user in MongoDB with pending approval"""
+    try:
+        # Check if user already exists
+        existing_user = await user_service.get_user_by_email(user_data.email)
+        
+        if existing_user:
+            # Update existing user to admin role with pending approval
+            if existing_user.get("role") == "admin":
+                if existing_user.get("is_admin_approved") is False:
+                    return {"message": "Admin registration already pending approval"}
+                else:
+                    return {"message": "Admin already approved"}
+            else:
+                # Update to admin role
+                await user_service.user_repo.update(
+                    str(existing_user["_id"]),
+                    {
+                        "role": "admin",
+                        "is_admin_approved": False,
+                        "is_active": False,
+                        "updated_at": datetime.utcnow()
+                    }
+                )
+                return {"message": "User updated to admin role with pending approval"}
+        
+        # Create new admin user
+        user = await user_service.create_user(user_data)
+        return {"message": "Admin registration submitted for approval", "user": user}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 @router.post("/login")
 async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     user_service: UserService = Depends(get_user_service)
 ):
     try:
+        print(f"[LOGIN ATTEMPT] Email: {form_data.username}")
         user_check = await user_service.user_repo.get_by_email(form_data.username)
         if user_check:
+            print(f"[LOGIN CHECK] User found: {user_check.get('email')}, Role: {user_check.get('role')}, is_active: {user_check.get('is_active')}, is_admin_approved: {user_check.get('is_admin_approved')}")
             from app.core.security import verify_password
             hashed_pw = user_check.get("hashed_password")
             if hashed_pw is None:
                 hashed_pw = ""
-                
-            if (user_check.get("role") == "admin" and 
+
+            if (user_check.get("role") == "admin" and
                 user_check.get("is_admin_approved") is False and
                 verify_password(form_data.password, hashed_pw)):
+                print(f"[LOGIN BLOCKED] Admin not approved: {form_data.username}")
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Your admin registration is pending approval. Please wait for an existing admin to approve your request.",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
-        
+
         user = await user_service.authenticate_user(form_data.username, form_data.password)
         if not user:
+            print(f"[LOGIN FAILED] Authentication failed for: {form_data.username}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
+        print(f"[LOGIN SUCCESS] User authenticated: {user.get('email')}, Role: {user.get('role')}")
         
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(

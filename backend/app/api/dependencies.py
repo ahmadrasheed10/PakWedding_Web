@@ -17,6 +17,86 @@ from app.services.vendor_stats_service import VendorStatsService
 from app.services.review_service import ReviewService
 from app.services.checklist_service import ChecklistService
 from app.services.favorite_service import FavoriteService
+<<<<<<< Updated upstream
+=======
+from app.services.chatbot_service import ChatbotService
+import httpx
+from app.core.config import settings
+
+async def _fetch_clerk_user_info(user_id: str) -> dict:
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://api.clerk.com/v1/users/{user_id}",
+                headers={"Authorization": f"Bearer {settings.CLERK_SECRET_KEY}"},
+                timeout=5.0
+            )
+            if response.status_code == 200:
+                return response.json()
+    except Exception as e:
+        print(f"[AUTH] Failed to fetch clerk user info for {user_id}: {e}")
+    return {}
+
+async def _get_or_sync_clerk_user(user_id: str, payload: dict, user_service: UserService):
+    user = await user_service.get_user_by_clerk_id(user_id)
+    if user:
+        return user
+
+    email = payload.get("email") or ""
+    if not email and payload.get("email_addresses"):
+        email_addresses = payload.get("email_addresses") or []
+        if isinstance(email_addresses, list) and email_addresses:
+            first_email = email_addresses[0]
+            if isinstance(first_email, dict):
+                email = first_email.get("email_address") or first_email.get("email") or email
+            elif isinstance(first_email, str):
+                email = first_email
+
+    public_metadata = payload.get("public_metadata") or {}
+    unsafe_metadata = payload.get("unsafe_metadata") or {}
+    metadata_role = (
+        payload.get("role") or
+        public_metadata.get("role") or
+        unsafe_metadata.get("role") or
+        "user"
+    )
+
+    first = payload.get("first_name") or payload.get("given_name") or ""
+    last = payload.get("last_name") or payload.get("family_name") or ""
+    if not first and not last:
+        name = payload.get("name") or payload.get("full_name") or ""
+        name_parts = name.split() if isinstance(name, str) else []
+        first = name_parts[0] if name_parts else ""
+        last = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
+    full_name = f"{first} {last}".strip() or payload.get("name") or payload.get("full_name") or "Clerk User"
+
+    if not email or full_name == "Clerk User":
+        clerk_info = await _fetch_clerk_user_info(user_id)
+        if clerk_info:
+            if not email:
+                emails = clerk_info.get("email_addresses", [])
+                primary_id = clerk_info.get("primary_email_address_id")
+                for em in emails:
+                    if em.get("id") == primary_id:
+                        email = em.get("email_address")
+                        break
+                if not email and emails:
+                    email = emails[0].get("email_address")
+            if full_name == "Clerk User":
+                first = clerk_info.get("first_name") or ""
+                last = clerk_info.get("last_name") or ""
+                full_name = f"{first} {last}".strip() or "Clerk User"
+
+    user_data = {
+        "sub": user_id,
+        "email": email,
+        "full_name": full_name,
+        "role": metadata_role,
+        "is_active": True,
+        "created_at": datetime.utcfromtimestamp(payload["iat"]) if payload.get("iat") else datetime.utcnow(),
+    }
+    return await user_service.sync_clerk_user(user_data)
+>>>>>>> Stashed changes
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
@@ -116,45 +196,7 @@ async def get_current_user(
 
     user = None
     if is_clerk_token:
-        user = await user_service.get_user_by_clerk_id(user_id)
-        if not user:
-            # Extract email: Clerk JWT may put it in different fields
-            email = payload.get("email") or ""
-            if not email and payload.get("email_addresses"):
-                email_addresses = payload.get("email_addresses") or []
-                if isinstance(email_addresses, list) and email_addresses:
-                    first_email = email_addresses[0]
-                    if isinstance(first_email, dict):
-                        email = first_email.get("email_address") or first_email.get("email") or email
-                    elif isinstance(first_email, str):
-                        email = first_email
-
-            public_metadata = payload.get("public_metadata") or {}
-            unsafe_metadata = payload.get("unsafe_metadata") or {}
-            metadata_role = (
-                payload.get("role") or
-                public_metadata.get("role") or
-                unsafe_metadata.get("role") or
-                "user"
-            )
-
-            first = payload.get("first_name") or payload.get("given_name") or ""
-            last = payload.get("last_name") or payload.get("family_name") or ""
-            if not first and not last:
-                name = payload.get("name") or payload.get("full_name") or ""
-                name_parts = name.split() if isinstance(name, str) else []
-                first = name_parts[0] if name_parts else ""
-                last = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
-            full_name = f"{first} {last}".strip() or payload.get("name") or payload.get("full_name") or "Clerk User"
-            user_data = {
-                "sub": user_id,
-                "email": email,
-                "full_name": full_name,
-                "role": metadata_role,
-                "is_active": True,
-                "created_at": datetime.utcfromtimestamp(payload["iat"]) if payload.get("iat") else datetime.utcnow(),
-            }
-            user = await user_service.sync_clerk_user(user_data)
+        user = await _get_or_sync_clerk_user(user_id, payload, user_service)
     else:
         user = await user_service.get_user_by_id(user_id)
 
@@ -208,44 +250,7 @@ async def get_optional_current_user(
 
         user = None
         if is_clerk_token:
-            user = await user_service.get_user_by_clerk_id(user_id)
-            if not user:
-                email = payload.get("email") or ""
-                if not email and payload.get("email_addresses"):
-                    email_addresses = payload.get("email_addresses") or []
-                    if isinstance(email_addresses, list) and email_addresses:
-                        first_email = email_addresses[0]
-                        if isinstance(first_email, dict):
-                            email = first_email.get("email_address") or first_email.get("email") or email
-                        elif isinstance(first_email, str):
-                            email = first_email
-
-                public_metadata = payload.get("public_metadata") or {}
-                unsafe_metadata = payload.get("unsafe_metadata") or {}
-                metadata_role = (
-                    payload.get("role") or
-                    public_metadata.get("role") or
-                    unsafe_metadata.get("role") or
-                    "user"
-                )
-
-                first = payload.get("first_name") or payload.get("given_name") or ""
-                last = payload.get("last_name") or payload.get("family_name") or ""
-                if not first and not last:
-                    name = payload.get("name") or payload.get("full_name") or ""
-                    name_parts = name.split() if isinstance(name, str) else []
-                    first = name_parts[0] if name_parts else ""
-                    last = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
-                full_name = f"{first} {last}".strip() or payload.get("name") or payload.get("full_name") or "Clerk User"
-                user_data = {
-                    "sub": user_id,
-                    "email": email,
-                    "full_name": full_name,
-                    "role": metadata_role,
-                    "is_active": True,
-                    "created_at": datetime.utcfromtimestamp(payload["iat"]) if payload.get("iat") else datetime.utcnow(),
-                }
-                user = await user_service.sync_clerk_user(user_data)
+            user = await _get_or_sync_clerk_user(user_id, payload, user_service)
         else:
             user = await user_service.get_user_by_id(user_id)
         

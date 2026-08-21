@@ -142,6 +142,78 @@ async def upload_user_image(
             detail=f"Failed to upload image: {str(e)}"
         )
 
+@router.post("/chat/image")
+async def upload_chat_image(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    # Validate file type
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No file provided"
+        )
+
+    if not is_allowed_file(file.filename, file.content_type):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file type. Allowed: jpg, jpeg, png, gif, webp"
+        )
+
+    try:
+        # Read file
+        file_content = await file.read()
+
+        if not file_content:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File is empty"
+            )
+
+        # 5 MB limit
+        max_size = 5 * 1024 * 1024
+
+        if len(file_content) > max_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File size exceeds 5MB limit"
+            )
+
+        # Unique Cloudinary ID for this chat image
+        public_id = f"chat/{current_user['_id']}/{uuid.uuid4()}"
+
+        # Upload to Cloudinary
+        upload_result = await CloudinaryService.upload_image(
+            file_content=file_content,
+            folder="chat",
+            public_id=public_id
+        )
+
+        if not upload_result.get("url"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Cloudinary upload succeeded but no URL returned"
+            )
+
+        return {
+            "image_url": upload_result["url"],
+            "public_id": upload_result["public_id"],
+            "message": "Chat image uploaded successfully"
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        import traceback
+
+        print(f"Error uploading chat image: {str(e)}")
+        print(traceback.format_exc())
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload chat image: {str(e)}"
+        )
 
 @router.post("/admin/vendor/image")
 async def upload_vendor_image_admin(

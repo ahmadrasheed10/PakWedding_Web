@@ -173,6 +173,7 @@ export default function BookingPage() {
                     name="eventDate"
                     value={formData.eventDate}
                     onChange={handleChange}
+                    min={new Date(new Date().getTime() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0]}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent bg-white"
                     placeholder="Select date"
                     required

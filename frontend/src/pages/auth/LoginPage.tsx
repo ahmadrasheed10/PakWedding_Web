@@ -30,7 +30,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!authLoaded) return
-    
+
     if (isSignedIn) {
       const role = (clerkUser?.publicMetadata?.role as string) || (clerkUser?.unsafeMetadata?.role as string) || 'user'
       if (role === 'vendor') {
@@ -53,7 +53,7 @@ export default function LoginPage() {
     setError('')
     setEmailError('')
     setIsSubmitting(true)
-    
+
     if (!isLoaded || !signIn) {
       showError('Authentication is still loading. Please try again.')
       setIsSubmitting(false)
@@ -177,11 +177,10 @@ export default function LoginPage() {
                 setEmailError('')
                 setError('')
               }}
-              className={`w-full px-3 sm:px-4 py-2.5 sm:py-3 border-2 rounded-lg focus:outline-none focus:ring-2 transition-all duration-300 text-sm sm:text-base ${
-                emailError
-                  ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
-                  : 'border-gray-300 focus:ring-primary-500 focus:border-primary-500'
-              }`}
+              className={`w-full px-3 sm:px-4 py-2.5 sm:py-3 border-2 rounded-lg focus:outline-none focus:ring-2 transition-all duration-300 text-sm sm:text-base ${emailError
+                ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                : 'border-gray-300 focus:ring-primary-500 focus:border-primary-500'
+                }`}
               placeholder="Enter your email"
               required
             />
