@@ -27,6 +27,10 @@ export type Vendor = {
   is_approved?: boolean
   is_active?: boolean
   created_at?: string
+  // Map / location fields
+  latitude?: number | null
+  longitude?: number | null
+  location_address?: string | null
 }
 
 export async function fetchVendors(category?: string, limit: number = 200) {

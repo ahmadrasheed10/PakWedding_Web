@@ -4,6 +4,7 @@ import { getVendorProfile, updateVendorProfile, Vendor } from '../../services/ve
 import { getUserProfile, updatePassword } from '../../services/userService'
 import api from '../../services/api'
 import Sidebar from '../../components/Sidebar'
+import MapPicker from '../../components/MapPicker'
 
 export default function VendorProfilePage() {
   const navigate = useNavigate()
@@ -11,7 +12,7 @@ export default function VendorProfilePage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'image'>('profile')
+  const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'image' | 'location'>('profile')
 
   const sidebarItems = [
     { path: '/vendor/dashboard', label: 'Dashboard', icon: '📊' },
@@ -29,6 +30,18 @@ export default function VendorProfilePage() {
     description: '',
     service_category: '',
   })
+
+  const [locationData, setLocationData] = useState<{
+    latitude: number | null
+    longitude: number | null
+    location_address: string | null
+  }>({
+    latitude: null,
+    longitude: null,
+    location_address: null,
+  })
+
+  const [savingLocation, setSavingLocation] = useState(false)
 
   const [passwordData, setPasswordData] = useState({
     old_password: '',
@@ -54,6 +67,11 @@ export default function VendorProfilePage() {
         business_address: vendorData.business_address || '',
         description: vendorData.description || '',
         service_category: vendorData.service_category || '',
+      })
+      setLocationData({
+        latitude: vendorData.latitude ?? null,
+        longitude: vendorData.longitude ?? null,
+        location_address: vendorData.location_address ?? null,
       })
       if (vendorData.image_url) {
         setImagePreview(vendorData.image_url)
@@ -194,6 +212,31 @@ export default function VendorProfilePage() {
     }
   }
 
+  const handleLocationSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!locationData.latitude || !locationData.longitude) {
+      setError('Please pick a location on the map first')
+      return
+    }
+    setSavingLocation(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const updatedVendor = await updateVendorProfile({
+        latitude: locationData.latitude,
+        longitude: locationData.longitude,
+        location_address: locationData.location_address ?? '',
+      })
+      setVendor(updatedVendor)
+      setSuccess('Location saved successfully!')
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to save location')
+    } finally {
+      setSavingLocation(false)
+    }
+  }
+
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-amber-50 via-orange-50/30 to-red-50/20">
       <Sidebar items={sidebarItems} title="Vendor Dashboard" />
@@ -248,6 +291,16 @@ export default function VendorProfilePage() {
               }`}
             >
               Profile Image
+            </button>
+            <button
+              onClick={() => setActiveTab('location')}
+              className={`flex-1 px-6 py-4 font-semibold transition-colors ${
+                activeTab === 'location'
+                  ? 'bg-pink-50 text-pink-600 border-b-2 border-pink-600'
+                  : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              📍 Venue Location
             </button>
           </div>
         </div>
@@ -449,6 +502,44 @@ export default function VendorProfilePage() {
                 className="w-full bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-all"
               >
                 {saving ? 'Uploading...' : 'Upload Image'}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* Location Tab */}
+        {activeTab === 'location' && (
+          <div className="bg-white rounded-xl shadow-lg p-8">
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Venue Location</h2>
+            <p className="text-gray-500 text-sm mb-6">
+              Pin your venue on the map so customers can find you easily. Search for your address or click directly on the map.
+            </p>
+
+            {/* Current saved location badge */}
+            {vendor?.latitude && vendor?.longitude && (
+              <div className="mb-6 flex items-center gap-2 bg-green-50 border border-green-200 text-green-800 rounded-lg px-4 py-3 text-sm">
+                <span>✅</span>
+                <span className="font-medium">Location already saved.</span>
+                <span className="text-green-600">Update it below if needed.</span>
+              </div>
+            )}
+
+            <form onSubmit={handleLocationSubmit} className="space-y-6">
+              <MapPicker
+                initialLat={locationData.latitude}
+                initialLng={locationData.longitude}
+                initialAddress={locationData.location_address}
+                onLocationChange={(lat, lng, addr) =>
+                  setLocationData({ latitude: lat || null, longitude: lng || null, location_address: addr || null })
+                }
+              />
+
+              <button
+                type="submit"
+                disabled={savingLocation || !locationData.latitude}
+                className="w-full bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-all"
+              >
+                {savingLocation ? 'Saving Location...' : '📍 Save Location'}
               </button>
             </form>
           </div>
