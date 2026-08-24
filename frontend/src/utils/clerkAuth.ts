@@ -29,7 +29,18 @@ export function getClerkErrorMessage(err: unknown, fallback = 'Something went wr
   }
 
   if (err && typeof err === 'object') {
-    const message = (err as any)?.message || (err as any)?.response?.data?.message || (err as any)?.data?.message
+    const data = (err as any)?.response?.data || (err as any)?.data
+    if (data) {
+      // Handle FastAPI's detail field
+      if (data.detail) {
+        if (typeof data.detail === 'string') return data.detail
+        if (Array.isArray(data.detail) && data.detail[0]?.msg) return data.detail[0].msg
+      }
+      if (typeof data.message === 'string' && data.message.trim()) {
+        return data.message
+      }
+    }
+    const message = (err as any)?.message
     if (typeof message === 'string' && message.trim()) {
       return message
     }

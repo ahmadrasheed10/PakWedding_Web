@@ -1,11 +1,13 @@
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
+import api from '../../services/api'
 import { fetchVendorById, Vendor } from '../../services/vendorService'
 import BookingModal from '../../components/BookingModal'
 import { useAuthStore } from '../../store/authStore'
 
 export default function VendorProfilePage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const { user } = useAuthStore()
   const [vendor, setVendor] = useState<Vendor | null>(null)
   const [loading, setLoading] = useState(true)
@@ -61,6 +63,20 @@ export default function VendorProfilePage() {
   const handleBookingSuccess = () => {
     alert('Booking request sent successfully!')
     setIsBookingModalOpen(false)
+  }
+
+  const handleMessageClick = async () => {
+    if (!user) {
+      alert('Please log in to message a vendor.')
+      return
+    }
+    try {
+      await api.post('/chat/conversations', { vendor_id: vendor?.id || vendor?._id || id })
+      navigate('/messages')
+    } catch (err) {
+      console.error('Failed to start conversation', err)
+      alert('Failed to start conversation. Please try again.')
+    }
   }
 
   if (loading) {
@@ -248,6 +264,12 @@ export default function VendorProfilePage() {
                   className="bg-gradient-to-r from-[#D72626] via-[#F26D46] to-[#F7A76C] hover:from-red-700 hover:via-orange-700 hover:to-orange-800 text-white px-6 py-2.5 rounded-lg text-base font-bold whitespace-nowrap transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-105 w-full md:w-auto"
                 >
                   {user ? '📅 Book Now' : '🔐 Login to Book'}
+                </button>
+                <button
+                  onClick={handleMessageClick}
+                  className="bg-white text-primary-600 border border-primary-600 hover:bg-primary-50 px-6 py-2.5 rounded-lg text-base font-bold whitespace-nowrap transition-all duration-300 shadow-sm hover:shadow-md transform hover:scale-105 w-full md:w-auto flex items-center justify-center gap-2"
+                >
+                  💬 Message Vendor
                 </button>
                 <div className="flex gap-2 w-full md:w-auto">
                   <button className="flex-1 md:flex-none bg-white border border-gray-200 p-2.5 rounded-lg shadow-sm hover:shadow-md hover:border-primary-300 hover:bg-primary-50 transition-all duration-300 transform hover:scale-105">

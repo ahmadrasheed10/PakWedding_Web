@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from app.api.routes import auth, users, vendors, bookings, admin, services, uploads, vendor_bookings, reviews, checklist, favorites, chatbot
+from app.api.routes import auth, users, vendors, bookings, admin, services, uploads, vendor_bookings, reviews, checklist, favorites, chatbot, chat
 from app.core.config import settings
 from app.core.database import Database
 
@@ -86,6 +86,7 @@ app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews"])
 app.include_router(checklist.router, prefix="/api/checklist", tags=["Checklist"])
 app.include_router(favorites.router, prefix="/api/favorites", tags=["Favorites"])
 app.include_router(chatbot.router, prefix="/api/chatbot", tags=["Chatbot"])
+app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 
 @app.get("/")
 async def root():

@@ -1,201 +1,91 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { useSignIn, useClerk } from '@clerk/clerk-react'
-import { useAuthStore } from '../../store/authStore'
+import { useNavigate } from 'react-router-dom'
 import api from '../../services/api'
-import { getClerkErrorMessage, waitForAuthSync } from '../../utils/clerkAuth'
+import toast from 'react-hot-toast'
 
 export default function AdminLoginPage() {
-  const { isLoaded, signIn, setActive } = useSignIn()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [twoFactorCode, setTwoFactorCode] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
   const navigate = useNavigate()
-  const clerk = useClerk()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
-    setLoading(true)
-
-    if (!isLoaded || !signIn) {
-      setError('Authentication is still loading. Please try again.')
-      setLoading(false)
-      return
-    }
+    setIsLoading(true)
 
     try {
-      if (!email || !password) {
-        setError('Please enter both email and password')
-        setLoading(false)
-        return
-      }
-
-      if (twoFactorCode && twoFactorCode.length < 6) {
-        setError('Invalid 2FA code')
-        setLoading(false)
-        return
-      }
-
-      const result = await signIn.create({
-        identifier: email.trim(),
-        password,
+      const response = await api.post('/auth/admin/login', {
+        email,
+        password
       })
 
-      if (result.status === 'complete' && result.createdSessionId) {
-        await setActive({ session: result.createdSessionId })
-        await waitForAuthSync()
-
-        const storedUser = useAuthStore.getState().user
-        const storedToken = useAuthStore.getState().token
-
-        if (storedToken && storedUser?.role === 'admin') {
-          navigate('/admin/dashboard')
-          return
-        }
-
-        if (storedToken) {
-          try {
-            if (clerk?.signOut) await clerk.signOut()
-          } catch (err) {
-            console.warn('[AdminLoginPage] Clerk sign-out failed for non-admin user:', err)
-          }
-          useAuthStore.getState().logout()
-        }
+      if (response.data.token) {
+        localStorage.setItem('admin_token', response.data.token)
+        toast.success('Login successful')
+        navigate('/admin/dashboard')
       }
-
-      const backendLogin = async () => {
-        const formData = new URLSearchParams()
-        formData.append('username', email.trim())
-        formData.append('password', password)
-
-        const response = await api.post('/auth/login', formData, {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        })
-
-        const backendUser = response.data?.user
-        const backendToken = response.data?.access_token
-        if (backendUser && backendToken && backendUser.role === 'admin') {
-          useAuthStore.getState().setAuth(backendUser, backendToken)
-          navigate('/admin/dashboard')
-          return true
-        }
-
-        return false
-      }
-
-      if (isLoaded && signIn) {
-        try {
-          const result = await signIn.create({
-            identifier: email.trim(),
-            password,
-          })
-
-          if (result.status === 'complete' && result.createdSessionId) {
-            await setActive({ session: result.createdSessionId })
-            await waitForAuthSync()
-
-            const storedUser = useAuthStore.getState().user
-            const storedToken = useAuthStore.getState().token
-
-            if (storedToken && storedUser?.role === 'admin') {
-              navigate('/admin/dashboard')
-              return
-            }
-
-            if (storedToken) {
-              try {
-                if (clerk?.signOut) await clerk.signOut()
-              } catch (err) {
-                console.warn('[AdminLoginPage] Clerk sign-out failed for non-admin user:', err)
-              }
-              useAuthStore.getState().logout()
-            }
-          }
-        } catch {
-          // If Clerk admin login is unavailable or fails, fallback to backend auth
-        }
-      }
-
-      const backendSuccess = await backendLogin()
-      if (!backendSuccess) {
-        setError('Admin login failed. Please check your credentials and try again.')
-      }
-    } catch (err: unknown) {
-      const errorMessage = getClerkErrorMessage(err, 'Login failed. Please check your credentials and try again.')
-      setError(errorMessage)
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Login failed')
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50/30 to-red-50/20 flex items-center justify-center py-12 px-4">
-      <div className="max-w-md w-full bg-white rounded-lg shadow-xl p-8">
-        <h2 className="text-3xl font-bold text-center text-gray-900 mb-8">Admin Access</h2>
-        
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 text-sm">
-            {error}
-          </div>
-        )}
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center p-4">
+      <div className="max-w-md w-full bg-white rounded-2xl shadow-2xl p-8">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Admin Login</h1>
+          <p className="text-gray-600">Access the admin dashboard</p>
+        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className="block text-gray-700 font-medium mb-2">Admin Email</label>
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+              Email
+            </label>
             <input
+              id="email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              placeholder="Enter admin email"
               required
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-transparent outline-none transition"
+              placeholder="admin@example.com"
             />
           </div>
 
           <div>
-            <label className="block text-gray-700 font-medium mb-2">Password</label>
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+              Password
+            </label>
             <input
+              id="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              placeholder="Enter password"
               required
-            />
-          </div>
-
-          <div>
-            <label className="block text-gray-700 font-medium mb-2">2FA Code (Optional)</label>
-            <input
-              type="text"
-              value={twoFactorCode}
-              onChange={(e) => setTwoFactorCode(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              placeholder="Enter 2FA code"
-              maxLength={6}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-transparent outline-none transition"
+              placeholder="••••••••"
             />
           </div>
 
           <button
             type="submit"
-            disabled={loading}
-            className={`w-full bg-pink-600 hover:bg-pink-700 text-white py-3 rounded-lg font-semibold transition-colors ${
-              loading ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
+            disabled={isLoading}
+            className="w-full bg-gray-900 text-white py-3 rounded-lg font-semibold hover:bg-gray-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? 'Logging in...' : 'Enter Admin Portal'}
+            {isLoading ? 'Logging in...' : 'Login'}
           </button>
         </form>
 
         <div className="mt-6 text-center">
-          <Link to="/login" className="text-sm text-[#D72626] hover:text-red-700 transition-colors font-semibold">
+          <button
+            onClick={() => navigate('/login')}
+            className="text-gray-600 hover:text-gray-900 text-sm"
+          >
             Back to User Login
-          </Link>
+          </button>
         </div>
       </div>
     </div>

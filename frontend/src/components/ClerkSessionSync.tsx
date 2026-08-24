@@ -16,6 +16,19 @@ export default function ClerkSessionSync() {
 
       if (isSignedIn && clerkUser) {
         try {
+          // Protect local JWT sessions from being overwritten by Clerk
+          const currentToken = useAuthStore.getState().token
+          if (currentToken) {
+            try {
+              const payload = JSON.parse(atob(currentToken.split('.')[1]))
+              const isClerk = payload.iss && (payload.iss.includes('clerk') || payload.iss.includes('clerk.accounts'))
+              if (!isClerk) {
+                // This is a local token (like an Admin login). Do not overwrite it!
+                return
+              }
+            } catch (e) { }
+          }
+
           const token = await getToken()
           if (!token) return
 
@@ -89,6 +102,16 @@ export default function ClerkSessionSync() {
     const interval = setInterval(async () => {
       if (!isLoaded || !isSignedIn || !clerkUser) return
       try {
+        // Protect local JWT sessions from being overwritten during refresh
+        const currentToken = useAuthStore.getState().token
+        if (currentToken) {
+          try {
+            const payload = JSON.parse(atob(currentToken.split('.')[1]))
+            const isClerk = payload.iss && (payload.iss.includes('clerk') || payload.iss.includes('clerk.accounts'))
+            if (!isClerk) return
+          } catch (e) { }
+        }
+
         const token = await getToken()
         if (token) {
           const currentUser = useAuthStore.getState().user

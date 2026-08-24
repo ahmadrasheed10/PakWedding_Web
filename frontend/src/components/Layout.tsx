@@ -3,13 +3,15 @@ import Navbar from './Navbar'
 import Footer from './Footer'
 import { useAuthStore } from '../store/authStore'
 import { useLocation } from 'react-router-dom'
+import { useAuth } from '@clerk/clerk-react'
 
 interface LayoutProps {
   children: ReactNode
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const { user, checkSessionExpiry } = useAuthStore()
+  const { user, token, checkSessionExpiry } = useAuthStore()
+  const { isSignedIn } = useAuth()
   const location = useLocation()
 
   useEffect(() => {
@@ -99,7 +101,7 @@ export default function Layout({ children }: LayoutProps) {
     return () => clearTimeout(timer)
   }, [user, checkSessionExpiry, location.pathname])
 
-  const token = useAuthStore.getState().token
+  // token is now read reactively via the store hook above
 
   // Hide header/footer only for authenticated dashboard/management areas.
   const isUserSection =
@@ -109,6 +111,7 @@ export default function Layout({ children }: LayoutProps) {
     location.pathname === '/budget-planner' ||
     location.pathname === '/checklist' ||
     location.pathname === '/favorites' ||
+    location.pathname === '/messages' ||
     location.pathname === '/reviews' ||
     location.pathname.startsWith('/vendors')
 
@@ -116,6 +119,7 @@ export default function Layout({ children }: LayoutProps) {
     location.pathname.startsWith('/vendor/dashboard') ||
     location.pathname.startsWith('/vendor/bookings') ||
     location.pathname.startsWith('/vendor/profile') ||
+    location.pathname.startsWith('/vendor/messages') ||
     location.pathname.startsWith('/vendor/packages') ||
     location.pathname.startsWith('/vendor/reviews')
 
@@ -126,7 +130,10 @@ export default function Layout({ children }: LayoutProps) {
     location.pathname.startsWith('/admin/reviews') ||
     location.pathname.startsWith('/admin/admin-approvals')
 
-  const hideHeaderFooter = !!(user && token) && (isUserSection || isVendorSection || isAdminSection)
+  // Consider authenticated if we have a local token OR Clerk says the user is signed in.
+  // This prevents a flash of the public navbar during the brief moment a Clerk token is refreshing.
+  const isAuthenticated = !!(token || isSignedIn) && !!user
+  const hideHeaderFooter = isAuthenticated && (isUserSection || isVendorSection || isAdminSection)
 
   return (
     <div className="min-h-screen flex flex-col">

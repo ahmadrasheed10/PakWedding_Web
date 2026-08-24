@@ -17,6 +17,7 @@ async def register_vendor(
         vendor = await vendor_service.register_vendor(vendor_data, clerk_user=current_user)
         return vendor
     except ValueError as e:
+        print(f"[DEBUG] register_vendor ValueError: {str(e)}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         print(f"[ERROR] Error registering vendor: {e}")

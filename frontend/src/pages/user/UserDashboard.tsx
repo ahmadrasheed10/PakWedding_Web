@@ -1,8 +1,10 @@
+import { Link } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '../../store/authStore'
 import api from '../../services/api'
 import Sidebar from '../../components/Sidebar'
 import Chatbot from '../../components/Chatbot'
+import MessageNotification from '../../components/MessageNotification'
 
 interface DashboardStats {
   bookings: number
@@ -19,6 +21,7 @@ export default function UserDashboard() {
     { path: '/dashboard', label: 'Dashboard', icon: '📊' },
     { path: '/vendors', label: 'Find Vendors', icon: '🔍' },
     { path: '/bookings/history', label: 'My Bookings', icon: '📅' },
+    { path: '/messages', label: 'Messages', icon: '💬' },
     { path: '/budget-planner', label: 'Budget Planner', icon: '💰' },
     { path: '/checklist', label: 'Checklist', icon: '✅' },
     { path: '/favorites', label: 'Favorites', icon: '❤️' },
@@ -78,6 +81,8 @@ export default function UserDashboard() {
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-amber-50 via-orange-50/30 to-red-50/20">
       <Sidebar items={sidebarItems} title="User Dashboard" />
+
+      <MessageNotification />
       
       <div className="flex-1 flex flex-col pt-16 lg:pt-0">
         {/* Modern Elegant Header */}
@@ -157,8 +162,9 @@ export default function UserDashboard() {
 
           </div>
         </div>
+        
       </div>
-      <Chatbot />
+      <Chatbot/>
     </div>
   )
 }

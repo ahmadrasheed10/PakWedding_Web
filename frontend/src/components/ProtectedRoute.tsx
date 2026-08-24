@@ -9,9 +9,12 @@ interface ProtectedRouteProps {
 
 export default function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
   const navigate = useNavigate()
-  const { user, token } = useAuthStore()
+  const { user, token, _hasHydrated } = useAuthStore()
 
   useEffect(() => {
+    // Wait until Zustand has fully loaded from sessionStorage before making decisions
+    if (!_hasHydrated) return
+
     // Check authentication
     if (!token || !user) {
       console.log('[PROTECTED ROUTE] No authentication found, redirecting to login')
@@ -35,7 +38,19 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
     }
 
     console.log('[PROTECTED ROUTE] Access granted for user:', user.email, 'Role:', user.role)
-  }, [token, user, requiredRole, navigate])
+  }, [_hasHydrated, token, user, requiredRole, navigate])
+
+  // Show loading screen until store has loaded from sessionStorage
+  if (!_hasHydrated) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50/30 to-red-50/20 flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-16 w-16 border-4 border-primary-200 border-t-primary-600 mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    )
+  }
 
   // If authenticated and authorized, render children
   if (token && user && (!requiredRole || user.role === requiredRole)) {
@@ -52,4 +67,3 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
     </div>
   )
 }
-

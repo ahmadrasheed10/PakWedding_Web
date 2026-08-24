@@ -7,6 +7,49 @@ import { getRandomVendorImages, getVendorImagesByCategory } from '../../config/v
 import api from '../../services/api'
 import Sidebar from '../../components/Sidebar'
 
+const extractCityFromAddress = (address: string): string => {
+  if (!address) return '';
+  const lowerAddr = address.toLowerCase();
+  
+  const majorCities = [
+    'Lahore', 'Islamabad', 'Karachi', 'Rawalpindi', 'Faisalabad', 
+    'Multan', 'Peshawar', 'Quetta', 'Sialkot', 'Gujranwala', 
+    'Hyderabad', 'Abbottabad', 'Bahawalpur', 'Sargodha', 'Sukkur',
+    'Kashmir', 'Muzaffarabad', 'Gilgit', 'Skardu', 'Gwadar'
+  ];
+
+  for (const city of majorCities) {
+    if (lowerAddr.includes(city.toLowerCase())) {
+      if (['Kashmir', 'Gilgit', 'Skardu'].includes(city)) {
+        return city;
+      }
+      return `${city}, Pakistan`;
+    }
+  }
+
+  const parts = address.split(',').map(p => p.trim()).filter(Boolean);
+  let candidate = address;
+  if (parts.length >= 2) {
+    const last = parts[parts.length - 1];
+    const secondLast = parts[parts.length - 2];
+    if (last.toLowerCase() === 'pakistan' || last.toLowerCase() === 'pk') {
+      candidate = `${secondLast}, Pakistan`;
+    } else {
+      candidate = last;
+    }
+  }
+  
+  const invalidKeywords = ['house', 'street', 'road', 'phase', 'town', 'plot', 'block', 'sector', 'society', 'colony', 'market', 'area', 'shop'];
+  const lowerCand = candidate.toLowerCase();
+  for (const kw of invalidKeywords) {
+    if (lowerCand.match(new RegExp(`\\b${kw}\\b`))) {
+      return '';
+    }
+  }
+  
+  return candidate;
+};
+
 type UiVendor = Vendor & {
   rating?: number
   reviews?: number
@@ -58,7 +101,7 @@ export default function BrowseVendorsPage() {
   }, [allVendorsForCategories])
   
   const locations = useMemo(() => {
-    return Array.from(new Set(allVendorsForCategories.map(v => v.business_address).filter(Boolean))).sort()
+    return Array.from(new Set(allVendorsForCategories.map(v => extractCityFromAddress(v.business_address)).filter(Boolean))).sort()
   }, [allVendorsForCategories])
 
   // Load favorites when user is logged in
@@ -177,7 +220,7 @@ export default function BrowseVendorsPage() {
 
     // Location filter
     if (selectedLocation) {
-      filtered = filtered.filter(v => v.business_address.includes(selectedLocation))
+      filtered = filtered.filter(v => extractCityFromAddress(v.business_address) === selectedLocation)
     }
 
     // Rating filter

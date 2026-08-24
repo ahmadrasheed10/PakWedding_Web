@@ -6,7 +6,6 @@ from app.repositories.vendor_repository import VendorRepository
 from app.repositories.booking_repository import BookingRepository
 from app.repositories.review_repository import ReviewRepository
 from app.repositories.favorite_repository import FavoriteRepository
-from app.repositories.chat_session_repository import ChatSessionRepository
 from bson import ObjectId
 from bson.errors import InvalidId
 import json
@@ -25,7 +24,7 @@ class ChatbotService:
         booking_repo: BookingRepository,
         review_repo: ReviewRepository,
         favorite_repo: FavoriteRepository,
-        chat_session_repo: ChatSessionRepository
+        chat_session_repo = None
     ):
         
         self.vendor_repo = vendor_repo
@@ -63,7 +62,12 @@ class ChatbotService:
 
         self.pakistani_cities = [
             "karachi", "lahore", "islamabad", "rawalpindi", "faisalabad",
-            "multan", "peshawar", "quetta", "sialkot", "gujranwala"
+            "multan", "peshawar", "quetta", "sialkot", "gujranwala",
+            "kashmir", "hyderabad", "sukkur", "larkana", "nawabshah",
+            "abbottabad", "mardan", "swat", "mingora", "kohat",
+            "dera ghazi khan", "bahawalpur", "sahiwal", "okara", "sheikhupura",
+            "jhang", "sargodha", "rahim yar khan", "gujrat", "sialkot",
+            "mirpur", "muzaffarabad", "gilgit", "skardu", "chitral"
         ]
 
         self.required_fields_order = ["city", "budget", "location", "date", "min_rating"]
@@ -94,7 +98,7 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
         message: str,
         conversation_history: List[Dict[str, str]],
         user_id: str,
-        collected_info: Dict[str, Any] = {},
+        collected_info: Optional[Dict[str, Any]] = None,
         expected_field: Optional[str] = None,
         session_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -121,23 +125,6 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
         messages.append({"role": "user", "content": message})
         
         intent = self._classify_intent(message, conversation_history)
-
-        # Create new session if none provided
-        if not session_id:
-            # Generate title from first message
-            title = message[:50] + "..." if len(message) > 50 else message
-            session_id = await self.chat_session_repo.create(
-                user_id=user_id,
-                title=title,
-                messages=[{"role": "user", "content": message, "timestamp": datetime.utcnow().isoformat()}]
-            )
-        else:
-            # Update existing session with new message
-            current_session = await self.chat_session_repo.get_by_id(session_id)
-            if current_session:
-                existing_messages = current_session.get("messages", [])
-                existing_messages.append({"role": "user", "content": message, "timestamp": datetime.utcnow().isoformat()})
-                await self.chat_session_repo.update(session_id, existing_messages)
 
         if self._is_closing_remark(message):
             intent = "general"
@@ -184,15 +171,26 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
             # General conversation
             result = await self._general_chat(messages)
         
-        # Save assistant response to session
-        if session_id and result.get("response"):
-            current_session = await self.chat_session_repo.get_by_id(session_id)
-            if current_session:
-                existing_messages = current_session.get("messages", [])
-                existing_messages.append({"role": "assistant", "content": result.get("response"), "timestamp": datetime.utcnow().isoformat()})
-                await self.chat_session_repo.update(session_id, existing_messages)
+        # Store chat session if session repo is available
+        if self.chat_session_repo:
+            try:
+                # Add user message and assistant response to conversation history
+                updated_history = conversation_history.copy()
+                updated_history.append({"role": "user", "content": message})
+                updated_history.append({"role": "assistant", "content": result.get("response", "")})
+                
+                if session_id:
+                    # Update existing session
+                    await self.chat_session_repo.update(session_id, updated_history)
+                    result["session_id"] = session_id
+                else:
+                    # Create new session with first message as title
+                    title = message[:50] + "..." if len(message) > 50 else message
+                    new_session_id = await self.chat_session_repo.create(user_id, title, updated_history)
+                    result["session_id"] = new_session_id
+            except Exception as e:
+                print(f"[CHATBOT] Failed to store chat session: {e}")
         
-        result["session_id"] = session_id
         return result
     
     def _is_closing_remark(self, message: str) -> bool:
@@ -855,11 +853,16 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
 
         vendors = await self.vendor_repo.find_many(query, skip=0, limit=500)
         found = set()
+        
         for vendor in vendors:
-            address = (vendor.get("business_address") or "").lower()
-            for city in self.pakistani_cities:
-                if re.search(rf"\b{re.escape(city)}\b", address):
-                    found.add(city.capitalize())
+            address = vendor.get("business_address") or ""
+            if address:
+                address_lower = address.lower()
+                # Check for known cities in the address
+                for known_city in self.pakistani_cities:
+                    if re.search(rf"\b{re.escape(known_city)}\b", address_lower):
+                        found.add(known_city.capitalize())
+        
         return sorted(found)
 
     async def _search_vendors(
@@ -1122,7 +1125,10 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
         return {
             "response": f"{category_text} are available in:\n{city_list}",
             "type": "list_locations",
-            
+            # "data" is expected to be a list of dicts (same shape as
+            # bookings/reviews/favorites/vendors) by the API's ChatResponse
+            # model — a plain list of strings failed Pydantic validation
+            # and 500'd every single successful response from this handler.
             "data": [{"city": c} for c in cities]
         }
 

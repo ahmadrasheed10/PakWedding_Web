@@ -4,70 +4,71 @@ import { useSignUp, useAuth, useUser } from '@clerk/clerk-react'
 import { showSuccess, showError, showWarning } from '../../utils/toast'
 import PasswordStrengthMeter from '../../components/PasswordStrengthMeter'
 import { getClerkErrorMessage, splitFullName, waitForAuthSync } from '../../utils/clerkAuth'
+import api from '../../services/api'
 
 // Email validation function
 const validateEmail = (email: string): { isValid: boolean; error: string } => {
   // Remove spaces
   email = email.trim()
-  
+
   // Basic format check
   const emailRegex = /^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
   if (!emailRegex.test(email)) {
     return { isValid: false, error: 'Please enter a valid email address' }
   }
-  
+
   // Check for double dots
   if (email.includes('..')) {
     return { isValid: false, error: 'Email cannot contain consecutive dots' }
   }
-  
+
   // Check for spaces
   if (email.includes(' ')) {
     return { isValid: false, error: 'Email cannot contain spaces' }
   }
-  
+
   // Check domain part
   const [localPart, domainPart] = email.split('@')
-  
+
   // Validate local part (before @)
   if (!localPart || localPart.length === 0) {
     return { isValid: false, error: 'Email must have content before @' }
   }
-  
+
   if (localPart.startsWith('.') || localPart.endsWith('.')) {
     return { isValid: false, error: 'Email cannot start or end with a dot' }
   }
-  
+
   // Validate domain part (after @)
   if (!domainPart || domainPart.length === 0) {
     return { isValid: false, error: 'Email must have a valid domain' }
   }
-  
+
   // Check for multiple @ symbols
   if (email.split('@').length > 2) {
     return { isValid: false, error: 'Email can only contain one @ symbol' }
   }
-  
+
   // Check for double extensions (e.g., .com.com)
   const domainParts = domainPart.split('.')
   const extensions = domainParts.slice(1) // Get all parts after the domain name
   const uniqueExtensions = new Set(extensions)
-  
+
   if (extensions.length !== uniqueExtensions.size) {
     return { isValid: false, error: 'Email has duplicate extensions (e.g., .com.com)' }
   }
-  
+
   // Check for valid TLD (top-level domain)
   const tld = domainParts[domainParts.length - 1]
   if (tld.length < 2) {
     return { isValid: false, error: 'Email must have a valid domain extension' }
   }
-  
+
   // Check if domain has at least one dot
   if (!domainPart.includes('.')) {
     return { isValid: false, error: 'Email must have a valid domain (e.g., example.com)' }
   }
-  
+
   return { isValid: true, error: '' }
 }
 
@@ -115,9 +116,24 @@ export default function RegisterPage() {
       await waitForAuthSync()
 
       if (formData.role === 'admin') {
-        showSuccess('Admin registration submitted! Your request is pending approval.')
-        setTimeout(() => navigate('/login'), 2000)
-        return
+        try {
+          // Create admin user in MongoDB with pending approval
+          await api.post('/auth/register-admin', {
+            email: formData.email.trim(),
+            full_name: formData.full_name.trim(),
+            phone_number: formData.phone_number.trim(),
+            password: formData.password,
+            role: 'admin'
+          })
+          showSuccess('Admin registration submitted! Your request is pending approval.')
+          setTimeout(() => navigate('/login'), 2000)
+          return
+        } catch (error: any) {
+          console.error('Failed to create admin in MongoDB:', error)
+          showError('Registration completed but failed to save to database. Please contact support.')
+          setTimeout(() => navigate('/login'), 2000)
+          return
+        }
       }
 
       showSuccess('Account created successfully! You can now login.')
@@ -139,7 +155,7 @@ export default function RegisterPage() {
       showWarning('Please fill in all required fields')
       return
     }
-    
+
     // Validate email format
     const emailValidation = validateEmail(formData.email)
     if (!emailValidation.isValid) {
@@ -298,11 +314,10 @@ export default function RegisterPage() {
                   setError('')
                   setAlreadyRegistered(false)
                 }}
-                className={`w-full px-3 sm:px-4 py-2.5 sm:py-3 border rounded-lg focus:outline-none focus:ring-2 text-sm sm:text-base ${
-                  emailError 
-                    ? 'border-red-500 focus:ring-red-500 focus:border-red-500' 
+                className={`w-full px-3 sm:px-4 py-2.5 sm:py-3 border rounded-lg focus:outline-none focus:ring-2 text-sm sm:text-base ${emailError
+                    ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
                     : 'border-gray-300 focus:ring-primary-600 focus:border-transparent'
-                }`}
+                  }`}
                 placeholder="Enter your email"
                 required
               />
@@ -328,28 +343,26 @@ export default function RegisterPage() {
                 <button
                   type="button"
                   onClick={() => setFormData({ ...formData, role: 'user' })}
-                  className={`px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg font-semibold transition-all text-sm sm:text-base ${
-                    formData.role === 'user'
+                  className={`px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg font-semibold transition-all text-sm sm:text-base ${formData.role === 'user'
                       ? 'bg-gradient-to-r from-primary-600 via-accent-600 to-primary-600 text-white shadow-lg'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                    }`}
                 >
                   User
                 </button>
                 <button
                   type="button"
                   onClick={() => setFormData({ ...formData, role: 'admin' })}
-                  className={`px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg font-semibold transition-all text-sm sm:text-base ${
-                    formData.role === 'admin'
+                  className={`px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg font-semibold transition-all text-sm sm:text-base ${formData.role === 'admin'
                       ? 'bg-gradient-to-r from-primary-600 via-accent-600 to-primary-600 text-white shadow-lg'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                    }`}
                 >
                   Admin
                 </button>
               </div>
               <p className="text-xs text-gray-500 mt-2">
-                {formData.role === 'user' 
+                {formData.role === 'user'
                   ? 'Sign up as a regular user to book vendors for your wedding'
                   : 'Sign up as an admin to manage the platform'}
               </p>
@@ -365,7 +378,7 @@ export default function RegisterPage() {
                 placeholder="Create a password"
                 required
               />
-              <PasswordStrengthMeter 
+              <PasswordStrengthMeter
                 password={formData.password}
                 onStrengthChange={setIsPasswordValid}
               />
