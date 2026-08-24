@@ -4,6 +4,7 @@ import api from '../../services/api'
 import { fetchVendorById, Vendor } from '../../services/vendorService'
 import BookingModal from '../../components/BookingModal'
 import { useAuthStore } from '../../store/authStore'
+import MapView from '../../components/MapView'
 
 export default function VendorProfilePage() {
   const { id } = useParams()
@@ -360,6 +361,26 @@ export default function VendorProfilePage() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Venue Location Section */}
+        {vendor.latitude && vendor.longitude && (
+          <div className="mb-8">
+            <div className="text-center mb-6">
+              <h2 className="text-2xl font-extrabold bg-gradient-to-r from-gray-900 via-primary-600 to-gray-900 bg-clip-text text-transparent mb-2">
+                Venue Location
+              </h2>
+              <p className="text-gray-600 text-sm">Find us on the map</p>
+            </div>
+            <div className="bg-white rounded-xl shadow-lg p-6 border-2 border-rose-100/50 hover:border-primary-200 transition-all duration-300">
+              <MapView
+                lat={vendor.latitude}
+                lng={vendor.longitude}
+                address={vendor.location_address}
+                vendorName={displayName}
+              />
             </div>
           </div>
         )}

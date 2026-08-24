@@ -26,6 +26,10 @@ class VendorBase(BaseModel):
     image_url: Optional[str] = None
     gallery_images: Optional[List[str]] = []
     packages: Optional[List[Dict]] = []
+    # Location fields for map integration
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    location_address: Optional[str] = None
 
 
 class VendorCreate(VendorBase):
@@ -41,6 +45,10 @@ class VendorUpdate(BaseModel):
     image_url: Optional[str] = None
     gallery_images: Optional[List[str]] = None
     packages: Optional[List[Dict]] = None
+    # Location fields
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    location_address: Optional[str] = None
 
 
 class VendorInDB(VendorBase):
