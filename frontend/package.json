@@ -10,6 +10,7 @@
     "emoji-picker-react": "^4.19.1",
     "leaflet": "^1.9.4",
     "leaflet-geosearch": "^3.11.1",
+    "mapbox-gl": "^3.29.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hook-form": "^7.48.2",
