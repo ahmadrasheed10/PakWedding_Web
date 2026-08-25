@@ -15,6 +15,37 @@ export default function VendorProfilePage() {
   const [error, setError] = useState<string | null>(null)
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false)
 
+
+  // Keep the vendor's info (including location) reasonably fresh without
+// a manual page reload — polls quietly and also refetches when the
+// user comes back to this tab after switching away.
+useEffect(() => {
+  if (!id) return
+
+  const refresh = async () => {
+    try {
+      const data = await fetchVendorById(id)
+      if (!data.id && data._id) data.id = data._id
+      setVendor(data)
+    } catch (err) {
+      
+      console.error('Background vendor refresh failed:', err)
+    }
+  }
+
+  const intervalId = setInterval(refresh, 20000) // every 20s
+
+  const handleVisibility = () => {
+    if (document.visibilityState === 'visible') refresh()
+  }
+  document.addEventListener('visibilitychange', handleVisibility)
+
+  return () => {
+    clearInterval(intervalId)
+    document.removeEventListener('visibilitychange', handleVisibility)
+  }
+}, [id])
+
   useEffect(() => {
     const load = async () => {
       if (!id) {

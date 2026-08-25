@@ -1,23 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
+import mapboxgl from 'mapbox-gl'
+import 'mapbox-gl/dist/mapbox-gl.css'
 
-import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
-import markerIcon from 'leaflet/dist/images/marker-icon.png'
-import markerShadow from 'leaflet/dist/images/marker-shadow.png'
+mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN
 
-delete (L.Icon.Default.prototype as any)._getIconUrl
-L.Icon.Default.mergeOptions({
-  iconUrl: markerIcon,
-  iconRetinaUrl: markerIcon2x,
-  shadowUrl: markerShadow,
-})
-
-const PAKISTAN_BOUNDS = L.latLngBounds(
-  L.latLng(23.5, 60.5),  // SW corner
-  L.latLng(37.5, 77.5)   // NE corner
-)
+const PAKISTAN_BOUNDS: mapboxgl.LngLatBoundsLike = [
+  [60.5, 23.5],
+  [77.5, 37.5],
+]
 
 interface LatLng {
   lat: number
@@ -31,61 +21,23 @@ interface MapPickerProps {
   onLocationChange: (lat: number, lng: number, address: string) => void
 }
 
-function ClickHandler({
-  onMapClick,
-  onOutOfBounds,
-}: {
-  onMapClick: (latlng: LatLng) => void
-  onOutOfBounds: () => void
-}) {
-  useMapEvents({
-    click(e) {
-      if (PAKISTAN_BOUNDS.contains(e.latlng)) {
-        onMapClick({ lat: e.latlng.lat, lng: e.latlng.lng })
-      } else {
-        onOutOfBounds()
-      }
-    },
-  })
-  return null
+interface Suggestion {
+  mapboxId: string
+  name: string
+  placeFormatted: string
 }
 
-function MapFlyTo({ position }: { position: LatLng }) {
-  const map = useMap()
-  useEffect(() => {
-    map.flyTo([position.lat, position.lng], 14, { duration: 1 })
-  }, [position, map])
-  return null
+interface SearchResult {
+  lat: number
+  lng: number
+  display_name: string
 }
 
-async function reverseGeocode(lat: number, lng: number): Promise<string> {
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
-      { headers: { 'Accept-Language': 'en' } }
-    )
-    const data = await res.json()
-    return data.display_name ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`
-  } catch {
-    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+function generateSessionToken() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
   }
-}
-
-async function searchAddress(query: string): Promise<{ lat: number; lng: number; display_name: string }[]> {
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&countrycodes=pk`,
-      { headers: { 'Accept-Language': 'en' } }
-    )
-    const data = await res.json()
-    return data.map((item: any) => ({
-      lat: parseFloat(item.lat),
-      lng: parseFloat(item.lon),
-      display_name: item.display_name,
-    }))
-  } catch {
-    return []
-  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 export default function MapPicker({
@@ -94,57 +46,213 @@ export default function MapPicker({
   initialAddress,
   onLocationChange,
 }: MapPickerProps) {
-  const defaultCenter: LatLng = { lat: 30.3753, lng: 69.3451 } 
+  const mapContainerRef = useRef<HTMLDivElement | null>(null)
+  const mapRef = useRef<mapboxgl.Map | null>(null)
+  const markerRef = useRef<mapboxgl.Marker | null>(null)
+
+  const defaultCenter: LatLng = { lat: 30.3753, lng: 69.3451 }
 
   const [position, setPosition] = useState<LatLng | null>(
-    initialLat && initialLng ? { lat: initialLat, lng: initialLng } : null
+    initialLat != null && initialLng != null ? { lat: initialLat, lng: initialLng } : null
   )
-  const [address, setAddress] = useState<string>(initialAddress ?? '')
+
+  const [address, setAddress] = useState(initialAddress ?? '')
   const [searchQuery, setSearchQuery] = useState('')
-  const [suggestions, setSuggestions] = useState<{ lat: number; lng: number; display_name: string }[]>([])
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [searching, setSearching] = useState(false)
   const [reverseLoading, setReverseLoading] = useState(false)
-  const [flyTo, setFlyTo] = useState<LatLng | null>(null)
   const [outOfBoundsWarning, setOutOfBoundsWarning] = useState(false)
+
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const applyPosition = async (latlng: LatLng) => {
-    setOutOfBoundsWarning(false)
-    setPosition(latlng)
-    setFlyTo(latlng)
-    setReverseLoading(true)
-    const resolved = await reverseGeocode(latlng.lat, latlng.lng)
-    setAddress(resolved)
-    setReverseLoading(false)
-    onLocationChange(latlng.lat, latlng.lng, resolved)
+  const sessionTokenRef = useRef<string>(generateSessionToken())
+
+  const isInsidePakistan = (lng: number, lat: number) => {
+    return lng >= 60.5 && lng <= 77.5 && lat >= 23.5 && lat <= 37.5
   }
 
-  const handleOutOfBounds = () => {
-    setOutOfBoundsWarning(true)
-    setTimeout(() => setOutOfBoundsWarning(false), 3000)
+  const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
+    try {
+      const token = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN
+      const response = await fetch(
+        `https://api.mapbox.com/search/geocode/v6/reverse?longitude=${lng}&latitude=${lat}&access_token=${token}`
+      )
+      if (!response.ok) throw new Error('Mapbox reverse geocoding failed')
+      const data = await response.json()
+      return data.features?.[0]?.properties?.full_address ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+    } catch (error) {
+      console.error('Mapbox reverse geocoding error:', error)
+      return `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+    }
   }
+
+  const fetchSuggestions = async (query: string): Promise<Suggestion[]> => {
+    try {
+      const token = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN
+      if (!token) {
+        console.error('Mapbox access token is missing')
+        return []
+      }
+
+      const center = mapRef.current?.getCenter()
+      const proximity = center ? `${center.lng},${center.lat}` : `${defaultCenter.lng},${defaultCenter.lat}`
+
+      const url =
+        `https://api.mapbox.com/search/searchbox/v1/suggest` +
+        `?q=${encodeURIComponent(query)}` +
+        `&country=PK` +
+        `&language=en` +
+        `&limit=8` +
+        `&proximity=${proximity}` +
+        `&types=poi,address,place,locality,neighborhood,street,district,region` +
+        `&session_token=${sessionTokenRef.current}` +
+        `&access_token=${encodeURIComponent(token)}`
+
+      const response = await fetch(url)
+      const data = await response.json()
+
+      if (!response.ok) {
+        console.error('Mapbox suggest failed:', response.status, data)
+        return []
+      }
+
+      return (data.suggestions ?? []).map((s: any) => ({
+        mapboxId: s.mapbox_id,
+        name: s.name,
+        placeFormatted: s.place_formatted ?? s.full_address ?? s.name,
+      }))
+    } catch (error) {
+      console.error('Mapbox suggest error:', error)
+      return []
+    }
+  }
+
+  const retrieveSuggestion = async (mapboxId: string): Promise<SearchResult | null> => {
+    try {
+      const token = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN
+      const url =
+        `https://api.mapbox.com/search/searchbox/v1/retrieve/${mapboxId}` +
+        `?session_token=${sessionTokenRef.current}` +
+        `&access_token=${encodeURIComponent(token)}`
+
+      const response = await fetch(url)
+      const data = await response.json()
+
+      if (!response.ok) {
+        console.error('Mapbox retrieve failed:', response.status, data)
+        return null
+      }
+
+      const feature = data.features?.[0]
+      const coordinates = feature?.geometry?.coordinates
+      if (!coordinates || coordinates.length < 2) return null
+
+      const [lng, lat] = coordinates
+      return {
+        lat,
+        lng,
+        display_name:
+          feature.properties?.full_address ?? feature.properties?.name ?? 'Selected location',
+      }
+    } catch (error) {
+      console.error('Mapbox retrieve error:', error)
+      return null
+    }
+  }
+
+  const updateMarker = (lat: number, lng: number) => {
+    if (!mapRef.current) return
+    if (markerRef.current) markerRef.current.remove()
+    markerRef.current = new mapboxgl.Marker({ color: '#e11d48' }).setLngLat([lng, lat]).addTo(mapRef.current)
+  }
+
+  const applyPosition = async ({ lat, lng }: LatLng) => {
+    if (!isInsidePakistan(lng, lat)) {
+      setOutOfBoundsWarning(true)
+      setTimeout(() => setOutOfBoundsWarning(false), 3000)
+      return
+    }
+
+    setOutOfBoundsWarning(false)
+    setPosition({ lat, lng })
+    updateMarker(lat, lng)
+
+    if (mapRef.current) {
+      mapRef.current.flyTo({ center: [lng, lat], zoom: 14, duration: 1000 })
+    }
+
+    setReverseLoading(true)
+    const resolvedAddress = await reverseGeocode(lat, lng)
+    setAddress(resolvedAddress)
+    setReverseLoading(false)
+
+    onLocationChange(lat, lng, resolvedAddress)
+  }
+
+  useEffect(() => {
+    if (!mapContainerRef.current) return
+    if (mapRef.current) return
+
+    const center = position ?? defaultCenter
+
+    const map = new mapboxgl.Map({
+      container: mapContainerRef.current,
+      style: 'mapbox://styles/mapbox/streets-v12',
+      center: [center.lng, center.lat],
+      zoom: position ? 14 : 5,
+      maxBounds: PAKISTAN_BOUNDS,
+    })
+
+    map.addControl(new mapboxgl.NavigationControl(), 'top-right')
+
+    map.on('load', () => {
+      mapRef.current = map
+      if (position) updateMarker(position.lat, position.lng)
+      map.resize()
+    })
+
+    map.on('click', async (event) => {
+      await applyPosition({ lat: event.lngLat.lat, lng: event.lngLat.lng })
+    })
+
+    return () => {
+      if (markerRef.current) markerRef.current.remove()
+      map.remove()
+      mapRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [])
 
   const handleSearchInput = (value: string) => {
     setSearchQuery(value)
     setSuggestions([])
+
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    if (value.trim().length < 3) return
+    if (value.trim().length < 2) return
+
     debounceRef.current = setTimeout(async () => {
       setSearching(true)
-      const results = await searchAddress(value)
+      const results = await fetchSuggestions(value)
       setSuggestions(results)
       setSearching(false)
-    }, 500)
+    }, 400)
   }
 
-  const handleSuggestionClick = (s: { lat: number; lng: number; display_name: string }) => {
+  const handleSuggestionClick = async (suggestion: Suggestion) => {
     setSuggestions([])
     setSearchQuery('')
-    const latlng = { lat: s.lat, lng: s.lng }
-    setPosition(latlng)
-    setFlyTo(latlng)
-    setAddress(s.display_name)
-    onLocationChange(s.lat, s.lng, s.display_name)
+
+    const result = await retrieveSuggestion(suggestion.mapboxId)
+
+    sessionTokenRef.current = generateSessionToken()
+
+    if (!result) return
+    await applyPosition({ lat: result.lat, lng: result.lng })
   }
 
   const handleClear = () => {
@@ -153,14 +261,23 @@ export default function MapPicker({
     setSearchQuery('')
     setSuggestions([])
     setOutOfBoundsWarning(false)
+    sessionTokenRef.current = generateSessionToken()
+
+    if (markerRef.current) {
+      markerRef.current.remove()
+      markerRef.current = null
+    }
+
+    if (mapRef.current) {
+      mapRef.current.flyTo({ center: [defaultCenter.lng, defaultCenter.lat], zoom: 5 })
+    }
+
     onLocationChange(0, 0, '')
   }
 
-  const mapCenter = position ?? defaultCenter
-
   return (
     <div className="space-y-3">
-      {/* Search bar */}
+      {/* Search */}
       <div className="relative">
         <div className="flex gap-2">
           <div className="relative flex-1">
@@ -168,7 +285,7 @@ export default function MapPicker({
               type="text"
               value={searchQuery}
               onChange={(e) => handleSearchInput(e.target.value)}
-              placeholder="Search city or address in Pakistan..."
+              placeholder="Search city, address, or venue name in Pakistan..."
               className="w-full px-4 py-2.5 pr-10 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 text-sm"
             />
             {searching && (
@@ -177,6 +294,7 @@ export default function MapPicker({
               </div>
             )}
           </div>
+
           {position && (
             <button
               type="button"
@@ -188,31 +306,31 @@ export default function MapPicker({
           )}
         </div>
 
-        {/* Autocomplete suggestions */}
         {suggestions.length > 0 && (
           <ul className="absolute z-[9999] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden">
-            {suggestions.map((s, i) => (
-              <li key={i}>
+            {suggestions.map((s) => (
+              <li key={s.mapboxId}>
                 <button
                   type="button"
                   onClick={() => handleSuggestionClick(s)}
                   className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-pink-50 hover:text-pink-700 transition-colors border-b border-gray-100 last:border-0"
                 >
                   <span className="mr-2 text-pink-500">📍</span>
-                  {s.display_name}
+                  <span className="font-medium">{s.name}</span>
+                  {s.placeFormatted && (
+                    <span className="block text-xs text-gray-400 ml-6">{s.placeFormatted}</span>
+                  )}
                 </button>
               </li>
             ))}
           </ul>
         )}
 
-        {/* No results hint */}
-        {!searching && searchQuery.trim().length >= 3 && suggestions.length === 0 && (
+        {!searching && searchQuery.trim().length >= 2 && suggestions.length === 0 && (
           <p className="mt-1 text-xs text-gray-400 pl-1">No Pakistani locations found for "{searchQuery}"</p>
         )}
       </div>
 
-      {/* Out-of-bounds warning */}
       {outOfBoundsWarning && (
         <div className="flex items-center gap-2 bg-orange-50 border border-orange-200 text-orange-700 rounded-lg px-4 py-2.5 text-sm">
           <span>⚠️</span>
@@ -220,28 +338,10 @@ export default function MapPicker({
         </div>
       )}
 
-      {/* Map — locked to Pakistan bounds */}
       <div className="rounded-xl overflow-hidden border-2 border-gray-200 shadow-md" style={{ height: '350px' }}>
-        <MapContainer
-          center={[mapCenter.lat, mapCenter.lng]}
-          zoom={position ? 14 : 5}
-          style={{ height: '100%', width: '100%' }}
-          scrollWheelZoom={true}
-          maxBounds={PAKISTAN_BOUNDS}
-          maxBoundsViscosity={1.0}
-          minZoom={5}
-        >
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          <ClickHandler onMapClick={applyPosition} onOutOfBounds={handleOutOfBounds} />
-          {flyTo && <MapFlyTo position={flyTo} />}
-          {position && <Marker position={[position.lat, position.lng]} />}
-        </MapContainer>
+        <div ref={mapContainerRef} style={{ height: '100%', width: '100%' }} />
       </div>
 
-      {}
       {position ? (
         <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm">
           <div className="flex items-start gap-2">
