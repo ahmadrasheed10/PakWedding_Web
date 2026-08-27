@@ -23,6 +23,20 @@ class ChatMessage(BaseModel):
     session_id: Optional[str] = None
 
 
+class VendorResult(BaseModel):
+    """Single vendor in a chatbot recommendation response."""
+    business_name: Optional[str] = None
+    service_category: Optional[str] = None
+    business_address: Optional[str] = None
+    rating: Optional[float] = None
+    image_url: Optional[str] = None
+    match_score: Optional[int] = None
+    match_reason: Optional[str] = None
+    _recommended_package: Optional[Dict[str, Any]] = None
+
+    model_config = {"extra": "allow"}   # pass-through any extra vendor fields
+
+
 class ChatResponse(BaseModel):
     response: str
     type: str
