@@ -1240,6 +1240,13 @@ Example output:
         info: Dict[str, Any]
     ) -> str:
         """Format vendor search results including match score."""
+        if not vendors:
+            cities = info.get("city") or []
+            city_str = ", ".join(cities) if isinstance(cities, list) else str(cities)
+            category = info.get("category", "vendor")
+            if city_str:
+                return f"I couldn't find any {category} vendors in {city_str}. Would you like to check another city or adjust your requirements?"
+            return f"I couldn't find any {category} vendors matching your criteria. Would you like to adjust your search?"
 
         response = f"I found {len(vendors)} vendor(s) for you:\n\n"
 

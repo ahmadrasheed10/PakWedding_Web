@@ -51,6 +51,11 @@ class VendorMatchService:
                     None,
                 )
 
+            # If the user specified a city, filter out vendors located outside that city
+            loc_report = report.get("location", {})
+            if loc_report.get("status") == "unmatched" and "outside your requested city" in str(loc_report.get("reason", "")):
+                continue
+
             v = dict(vendor)
             v["match_score"] = score
             v["match_reason"] = reason
