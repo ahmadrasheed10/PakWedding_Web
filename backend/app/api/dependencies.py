@@ -36,10 +36,12 @@ async def _fetch_clerk_user_info(user_id: str) -> dict:
     return {}
 
 async def _get_or_sync_clerk_user(user_id: str, payload: dict, user_service: UserService):
+    # First check if we already have this Clerk user in MongoDB
     user = await user_service.get_user_by_clerk_id(user_id)
     if user:
         return user
 
+    # Also check by email in case they were synced without clerk_id stored
     email = payload.get("email") or ""
     if not email and payload.get("email_addresses"):
         email_addresses = payload.get("email_addresses") or []
@@ -50,13 +52,16 @@ async def _get_or_sync_clerk_user(user_id: str, payload: dict, user_service: Use
             elif isinstance(first_email, str):
                 email = first_email
 
+    # Read metadata from JWT — note: unsafeMetadata is NOT included in Clerk
+    # production JWT tokens by default (unlike dev). Always fall back to
+    # fetching from the Clerk REST API to get the authoritative role.
     public_metadata = payload.get("public_metadata") or {}
     unsafe_metadata = payload.get("unsafe_metadata") or {}
     metadata_role = (
         payload.get("role") or
         public_metadata.get("role") or
         unsafe_metadata.get("role") or
-        "user"
+        ""   # empty = unknown, will be resolved via Clerk API below
     )
 
     first = payload.get("first_name") or payload.get("given_name") or ""
@@ -68,7 +73,9 @@ async def _get_or_sync_clerk_user(user_id: str, payload: dict, user_service: Use
         last = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
     full_name = f"{first} {last}".strip() or payload.get("name") or payload.get("full_name") or "Clerk User"
 
-    if not email or full_name == "Clerk User":
+    # Always fetch from Clerk API when email or role is missing — this is
+    # critical on production where unsafeMetadata is not in the JWT.
+    if not email or not metadata_role or full_name == "Clerk User":
         clerk_info = await _fetch_clerk_user_info(user_id)
         if clerk_info:
             if not email:
@@ -84,6 +91,19 @@ async def _get_or_sync_clerk_user(user_id: str, payload: dict, user_service: Use
                 first = clerk_info.get("first_name") or ""
                 last = clerk_info.get("last_name") or ""
                 full_name = f"{first} {last}".strip() or "Clerk User"
+            # Get role from Clerk API metadata — this is the authoritative source
+            # since unsafeMetadata is not in production JWTs
+            if not metadata_role:
+                clerk_public = clerk_info.get("public_metadata") or {}
+                clerk_unsafe = clerk_info.get("unsafe_metadata") or {}
+                metadata_role = (
+                    clerk_public.get("role") or
+                    clerk_unsafe.get("role") or
+                    "user"
+                )
+
+    if not metadata_role:
+        metadata_role = "user"
 
     user_data = {
         "sub": user_id,

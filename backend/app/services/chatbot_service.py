@@ -6,6 +6,7 @@ from app.repositories.vendor_repository import VendorRepository
 from app.repositories.booking_repository import BookingRepository
 from app.repositories.review_repository import ReviewRepository
 from app.repositories.favorite_repository import FavoriteRepository
+from app.services.vendor_match_service import VendorMatchService, _safe_float
 from bson import ObjectId
 from bson.errors import InvalidId
 import json
@@ -32,6 +33,7 @@ class ChatbotService:
         self.review_repo = review_repo
         self.favorite_repo = favorite_repo
         self.chat_session_repo = chat_session_repo
+        self.match_service = VendorMatchService()
         
         self.groq_enabled = bool(settings.GROQ_API_KEY)
         if self.groq_enabled:
@@ -127,38 +129,30 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
         intent = self._classify_intent(message, conversation_history)
 
         if self._is_closing_remark(message):
-            intent = "general"
+            cleaned = message.strip().lower().rstrip("!.,")
+            if any(g in cleaned for g in ("hi", "hello", "hey")):
+                closing_response = "Hello! How can I help you with your wedding planning today?"
+            elif any(b in cleaned for b in ("bye", "goodbye", "see you")):
+                closing_response = "Goodbye! Best of luck with your wedding preparations. Reach out anytime! 🎉"
+            else:
+                closing_response = "You're very welcome! 😊 If you'd like more details on any of these vendors or want to explore other options, feel free to ask. Happy planning! ✨"
+            result = {
+                "response": closing_response,
+                "type": "general",
+                "collected_info": collected_info or {},
+                "expected_field": expected_field
+            }
 
         elif (
             intent == "list_locations"
             and expected_field is not None
             and not re.search(r"\b(?:show|list|what|which|all|available|located)\b", message.lower())
         ):
-            # The bot is actively waiting on SOME slot-filling answer
-            # (city, budget, location, date, or rating — not just city),
-            # and this message doesn't actually read like a "list all
-            # cities" request (no query-style words) — treat it as an
-            # attempt to answer the pending question instead. Previously
-            # this only covered expected_field == "city", so a reply like
-            # "aove budget and cities" sent while the bot was waiting on
-            # BUDGET fell through and got hijacked into a city listing
-            # instead of being treated as (a garbled attempt at) an
-            # answer. A message like "show me all cities in pak wedding"
-            # clearly IS a genuine locations request even with an answer
-            # technically pending, so this guard still only fires for
-            # ambiguous replies, not real listing requests.
-            intent = "vendor_search"
-
-        elif intent in ("bookings", "reviews", "favorites", "list_locations"):
-            pass
-
-        elif collected_info or expected_field:
-            intent = "vendor_search"
-
-        if intent == "vendor_search":
             result = await self._handle_vendor_search(
-                message, user_id, collected_info, expected_field
+                message, user_id, collected_info, expected_field,
+                conversation_history=conversation_history
             )
+
         elif intent == "bookings":
             result = await self._handle_bookings_query(user_id)
         elif intent == "reviews":
@@ -167,6 +161,11 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
             result = await self._handle_favorites_query(user_id)
         elif intent == "list_locations":
             result = await self._handle_list_locations(message)
+        elif intent == "vendor_search" or collected_info or expected_field:
+            result = await self._handle_vendor_search(
+                message, user_id, collected_info, expected_field,
+                conversation_history=conversation_history
+            )
         else:
             # General conversation
             result = await self._general_chat(messages)
@@ -177,7 +176,19 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
                 # Add user message and assistant response to conversation history
                 updated_history = conversation_history.copy()
                 updated_history.append({"role": "user", "content": message})
-                updated_history.append({"role": "assistant", "content": result.get("response", "")})
+
+                assistant_entry: Dict[str, Any] = {
+                    "role": "assistant",
+                    "content": result.get("response", ""),
+                }
+                if result.get("vendors"):
+                    assistant_entry["vendors"] = self._jsonable(result.get("vendors"))
+                if result.get("collected_info"):
+                    assistant_entry["collected_info"] = self._jsonable(result.get("collected_info"))
+                if result.get("type"):
+                    assistant_entry["type"] = result.get("type")
+
+                updated_history.append(assistant_entry)
                 
                 if session_id:
                     # Update existing session
@@ -289,13 +300,121 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
         
         return "general"
     
+    async def _extract_priorities(
+        self,
+        conversation_history: List[Dict[str, str]],
+        current_message: str,
+    ) -> Dict[str, float]:
+        """
+        Use Groq to infer user priority weights from the full conversation.
+
+        Returns a dict with keys: budget, location, rating, availability
+        and float values that sum to 1.0.
+
+        Falls back to DEFAULT_PRIORITIES if Groq is unavailable or returns
+        unparseable output.  The LLM is explicitly told NOT to invent a
+        numerical score — it only determines relative importance weights.
+        """
+        from app.services.vendor_match_service import DEFAULT_PRIORITIES
+
+        if not self.groq_enabled:
+            return dict(DEFAULT_PRIORITIES)
+
+        # Build a compact conversation snapshot (last 10 turns max)
+        recent = conversation_history[-10:] if len(conversation_history) > 10 else conversation_history
+        convo_text = "\n".join(
+            f"{m['role'].upper()}: {m['content']}" for m in recent
+        )
+        if current_message:
+            convo_text += f"\nUSER: {current_message}"
+
+        prompt = f"""You are analysing a conversation between a user and a wedding vendor assistant.
+Your ONLY task is to infer how much each factor matters to THIS user based on what they said.
+
+Conversation:
+{convo_text}
+
+Output a JSON object with exactly these four keys and float values that sum to 1.0:
+  budget       — how important is staying within budget?
+  location     — how important is the city / area / neighbourhood?
+  rating       — how important is vendor reputation / reviews / quality?
+  availability — how important is the vendor being free on the requested date?
+
+Rules:
+- If the user explicitly says budget is critical (e.g. "cannot go above", "strict budget", "very important"), set budget >= 0.40.
+- If the user says they don't care about price (e.g. "money is no issue", "best quality only"), set budget <= 0.10.
+- If the user mentions a specific area like DHA or Gulberg, location should be >= 0.25.
+- If the user emphasises rating/quality/best, set rating >= 0.35.
+- If no clear priorities are expressed, use balanced weights: budget=0.35, location=0.25, rating=0.25, availability=0.15.
+- Values MUST be between 0.05 and 0.70 each.
+- Values MUST sum to exactly 1.0.
+- Return ONLY valid JSON, no explanation, no markdown.
+
+Example output:
+{{"budget": 0.40, "location": 0.30, "rating": 0.20, "availability": 0.10}}"""
+
+        models = ["llama-3.3-70b-versatile", "groq/compound", "openai/gpt-oss-120b"]
+        completion = None
+        for m in models:
+            try:
+                completion = self.client.chat.completions.create(
+                    model=m,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,   # low temp for consistent structured output
+                    max_tokens=80,
+                    stream=False,
+                )
+                if completion and completion.choices:
+                    break
+            except Exception:
+                continue
+
+        if not completion or not completion.choices:
+            return dict(DEFAULT_PRIORITIES)
+
+        try:
+            raw = completion.choices[0].message.content.strip()
+            # Strip markdown code fences if present
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            parsed = json.loads(raw)
+
+            keys = {"budget", "location", "rating", "availability"}
+            if not keys.issubset(parsed.keys()):
+                raise ValueError(f"Missing keys in LLM output: {parsed}")
+
+            priorities = {k: float(parsed[k]) for k in keys}
+
+            # ── Weight guardrails (10 %–45 % per dimension) ───────────────────
+            # The AI can adapt weights to the conversation, but no single factor
+            # should dominate.  Without this, a high min_rating like "4.6+"
+            # causes rating to reach 67 % and location to collapse to 6 %,
+            # making a wrong-city vendor score 94 % — which is misleading.
+            WEIGHT_MIN = 0.10   # no dimension < 10 %
+            WEIGHT_MAX = 0.45   # no dimension > 45 %
+            priorities = {k: max(WEIGHT_MIN, min(WEIGHT_MAX, v)) for k, v in priorities.items()}
+            # Re-normalise after clamping so weights still sum to 1.0
+            total = sum(priorities.values())
+            if total <= 0:
+                raise ValueError("All priorities are zero after clamping")
+            priorities = {k: v / total for k, v in priorities.items()}
+            # ──────────────────────────────────────────────────────────────────
+
+            print(f"[MATCH] AI-inferred priorities (clamped 10-45%): {priorities}")
+            return priorities
+
+        except Exception as e:
+            print(f"[MATCH] Priority extraction failed ({e}), using defaults")
+            return dict(DEFAULT_PRIORITIES)
+
     async def _handle_vendor_search(
         self,
         message: str,
         user_id: str,
         collected_info: Dict[str, Any],
-        expected_field: Optional[str] = None
-    ) -> Tuple[str, Dict[str, Any], Optional[str], Optional[List[Dict]]]:
+        expected_field: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, Any]:
         """Handle vendor search with slot filling."""
         print(f" _handle_vendor_search called with collected_info: {collected_info}, expected_field: {expected_field}")
         print(f" User message: {message}")
@@ -382,31 +501,56 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
                 "expected_field": missing_field
             })
 
-        # All required info gathered — search, with diagnostics if empty
-        vendors, diagnostic = await self._search_vendors(info)
+        # ── MATCH REPORT: Fetch ALL category candidates (no city/budget/rating/date filter) ──
+        # This is intentionally separate from _search_vendors().
+        # _search_vendors() applies hard city+budget+rating+date filters which cause every
+        # survivor to score ~100%.  For the Match Report we want ALL vendors in the category
+        # so that partial matches (wrong city, over-budget, below-rating) appear with reduced
+        # scores rather than being silently excluded.
+        match_candidates = await self._fetch_match_report_candidates(info)
 
-        if not vendors:
-            if diagnostic and diagnostic.get("suggested_value") is not None:
-                field = diagnostic["stage"]
-                value = diagnostic["suggested_value"]
-                info["_pending_suggestion"] = {"field": field, "value": value}
+        if not match_candidates:
+            # Nothing in this category at all — fall back to the normal filtered search
+            # so we can show a meaningful "no results" diagnostic to the user.
+            vendors, diagnostic = await self._search_vendors(info)
+
+            if not vendors:
+                if diagnostic and diagnostic.get("suggested_value") is not None:
+                    field = diagnostic["stage"]
+                    value = diagnostic["suggested_value"]
+                    info["_pending_suggestion"] = {"field": field, "value": value}
+                    return with_note({
+                        "response": diagnostic["message"],
+                        "type": "no_results",
+                        "collected_info": info,
+                        "expected_field": field
+                    })
+
+                message_text = diagnostic["message"] if diagnostic else (
+                    "I couldn't find any vendors matching your criteria. "
+                    "Would you like to adjust your budget, city, or other requirements?"
+                )
                 return with_note({
-                    "response": diagnostic["message"],
+                    "response": message_text,
                     "type": "no_results",
                     "collected_info": info,
-                    "expected_field": field
+                    "expected_field": None
                 })
 
-            message_text = diagnostic["message"] if diagnostic else (
-                "I couldn't find any vendors matching your criteria. "
-                "Would you like to adjust your budget, city, or other requirements?"
-            )
-            return with_note({
-                "response": message_text,
-                "type": "no_results",
-                "collected_info": info,
-                "expected_field": None
-            })
+            match_candidates = vendors   # use filtered results as fallback
+
+        # ── AI Match Scoring ─────────────────────────────────────────
+        # 1. Ask Groq to infer user priorities from the conversation.
+        # 2. Let VendorMatchService calculate deterministic scores from
+        #    real vendor data against ALL user preferences.
+        #    The LLM never invents a score number.
+        # Every category candidate is scored — partial matches get lower
+        # scores instead of being excluded from the report entirely.
+        priorities = await self._extract_priorities(
+            conversation_history or [], message
+        )
+        vendors = self.match_service.score_vendors(match_candidates, info, priorities)
+        # ─────────────────────────────────────────────────────────────
 
         response = self._format_vendor_results(vendors, info)
 
@@ -417,6 +561,40 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
             "collected_info": info,
             "expected_field": None
         })
+
+    async def _fetch_match_report_candidates(
+        self, info: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        MATCH REPORT FLOW ONLY — fetch ALL active/approved vendors whose
+        service_category matches the user's selected category.
+
+        Intentionally applies NO city, budget, rating, or date filters.
+        Every candidate is passed to VendorMatchService.score_vendors() so that
+        vendors with partial matches (wrong city, over-budget, below-min-rating)
+        appear in the report with *reduced* scores rather than being excluded.
+
+        This is deliberately separate from _search_vendors(), which hard-filters
+        on city+budget+rating+date and causes every survivor to score ~100%.
+        """
+        category = (info.get("category") or "").strip()
+        if not category:
+            # If no category was specified, fall back to returning nothing
+            # so the caller uses _search_vendors() with its normal diagnostics.
+            return []
+
+        try:
+            candidates = await self.vendor_repo.get_match_report_candidates(
+                category, limit=50
+            )
+            print(
+                f"[MATCH REPORT] Fetched {len(candidates)} category-only candidates "
+                f"for '{category}' (no city/budget/rating/date filter)"
+            )
+            return candidates
+        except Exception as exc:
+            print(f"[MATCH REPORT] candidate fetch failed: {exc}")
+            return []
 
     def _format_reused_note(self, reused_fields: List[str], info: Dict[str, Any]) -> str:
         """Build a short, transparent note describing which filters were
@@ -431,7 +609,8 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
             elif field == "budget":
                 budget = info.get("budget")
                 if budget:
-                    labels.append(f"budget: PKR {budget:,.0f}")
+                    b_val = _safe_float(budget, 0.0)
+                    labels.append(f"budget: PKR {b_val:,.0f}")
             elif field == "location":
                 loc = info.get("location")
                 if loc and loc != "Any":
@@ -665,9 +844,25 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
             if budget_value is not None and budget_value > 0:
                 info["budget"] = budget_value
             elif expected_field == "budget":
-                
                 fallback = self._parse_amount(message_lower, require_keyword=False)
                 if fallback is not None and fallback > 0:
+                    # ── Pakistani context: bare small numbers mean LAKH ──────────
+                    # When answering the budget question with just "3", "5", "10",
+                    # "3.5" etc. (no suffix), users almost always mean lakh
+                    # (× 100,000), not literal rupees.  A real PKR amount would be
+                    # typed as "300000", "300k", "3 lakh", or "3,00,000".
+                    # Threshold: anything ≤ 500 with no k-suffix treated as lakh.
+                    has_k_suffix = bool(re.search(r'\d\s*k\b', message_lower))
+                    has_lakh = bool(re.search(r'lakh|lac', message_lower))
+                    has_full_amount = bool(re.search(r'\d{4,}', message_lower))  # 4+ digit number
+                    if (
+                        not has_k_suffix
+                        and not has_lakh
+                        and not has_full_amount
+                        and 0 < fallback <= 500
+                    ):
+                        fallback = fallback * 100000  # treat as lakh
+                        print(f"[CHATBOT DEBUG] Interpreted bare number as lakh: original={fallback/100000} → PKR {fallback:,.0f}")
                     info["budget"] = fallback
                 else:
                     
@@ -776,10 +971,16 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
     def _parse_date(self, text: str) -> Optional[str]:
         """Best-effort date parsing — supports day-first and month-first formats."""
         patterns = [
-            r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}',
+            # ISO / numeric formats — year-first must come before day-first
+            # so "2026-08-15" is not mis-parsed as "26-08-15" by the
+            # \d{1,2} pattern grabbing the last two digits of the year.
             r'\d{4}[/-]\d{1,2}[/-]\d{1,2}',
-            r'(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?',
+            r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}',
+            # Natural-language dates — day-first must come before month-first
+            # so "30 august 2026" is not parsed as "august 20" (the \d{1,2}
+            # in the month-first pattern grabs "20" from "2026").
             r'\d{1,2}(?:st|nd|rd|th)?\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+\d{4})?',
+            r'(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?',
         ]
         for pattern in patterns:
             match = re.search(pattern, text)
@@ -885,17 +1086,17 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
                 query["business_address"] = {
                     "$regex": rf"\b{re.escape(city)}\b",
                     "$options": "i"
-        }
-        else:
-            query["$or"] = [
-            {
-                "business_address": {
-                    "$regex": rf"\b{re.escape(city.strip())}\b",
-                    "$options": "i"
                 }
-            }
-            for city in cities
-        ]
+            else:
+                query["$or"] = [
+                    {
+                        "business_address": {
+                            "$regex": rf"\b{re.escape(city.strip())}\b",
+                            "$options": "i"
+                        }
+                    }
+                    for city in cities
+                ]
 
 
         vendors = await self.vendor_repo.find_many(query, skip=0, limit=20)
@@ -948,29 +1149,31 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
 
         vendors_before_budget = vendors
 
-        budget = info.get("budget")
-        if budget:
+        budget_val = info.get("budget")
+        budget = _safe_float(budget_val, 0.0) if budget_val is not None else None
+        if budget and budget > 0:
             filtered_vendors = []
             for vendor in vendors:
                 packages = vendor.get("packages", [])
-                affordable = [p for p in packages if p.get("price", 0) <= budget]
+                affordable = [
+                    p for p in packages
+                    if 0 < _safe_float(p.get("price"), 0.0) <= budget
+                ]
                 if affordable:
-                    
-                    best = max(affordable, key=lambda p: p.get("price", 0))
-                    top_tier_price = max((p.get("price", 0) for p in packages), default=0)
+                    best = max(affordable, key=lambda p: _safe_float(p.get("price"), 0.0))
+                    top_tier_price = max((_safe_float(p.get("price"), 0.0) for p in packages), default=0.0)
                     best_copy = dict(best)
-                    best_copy["tier"] = "Premium" if best.get("price", 0) == top_tier_price else "Standard"
+                    best_copy["tier"] = "Premium" if _safe_float(best.get("price"), 0.0) == top_tier_price else "Standard"
                     vendor["_recommended_package"] = best_copy
                     filtered_vendors.append(vendor)
             vendors = filtered_vendors
 
             if not vendors:
-                
                 cheapest_per_vendor = [
-                    min((p.get("price", 0) for p in v.get("packages", []) if p.get("price")), default=None)
+                    min((_safe_float(p.get("price"), 0.0) for p in v.get("packages", []) if _safe_float(p.get("price"), 0.0) > 0), default=None)
                     for v in vendors_before_budget
                 ]
-                cheapest_per_vendor = [p for p in cheapest_per_vendor if p]
+                cheapest_per_vendor = [p for p in cheapest_per_vendor if p is not None and p > 0]
                 suggested_budget = min(cheapest_per_vendor) if cheapest_per_vendor else None
                 message = f"No vendors have a package within PKR {budget:,.0f}."
                 if suggested_budget:
@@ -986,12 +1189,12 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
 
         vendors_before_rating = vendors
 
-        if info.get("min_rating"):
-            min_rating = info["min_rating"]
-            vendors = [v for v in vendors if v.get("rating", 0) >= min_rating]
+        if info.get("min_rating") is not None:
+            min_rating = _safe_float(info["min_rating"], 0.0)
+            vendors = [v for v in vendors if _safe_float(v.get("rating"), 0.0) >= min_rating]
 
             if not vendors:
-                max_rating = max((v.get("rating", 0) for v in vendors_before_rating), default=0)
+                max_rating = max((_safe_float(v.get("rating"), 0.0) for v in vendors_before_rating), default=0.0)
                 message = f"No vendors rated {min_rating}+ found within your other criteria."
                 if max_rating:
                     message += (
@@ -1036,26 +1239,32 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
         vendors: List[Dict[str, Any]],
         info: Dict[str, Any]
     ) -> str:
-        """Format vendor search results"""
-        
-        budget = info.get("budget")
-        
+        """Format vendor search results including match score."""
+
         response = f"I found {len(vendors)} vendor(s) for you:\n\n"
-        
-        for i, vendor in enumerate(vendors[:5], 1):  # Show max 5 vendors
+
+        for i, vendor in enumerate(vendors[:5], 1):
             name = vendor.get("business_name", "Unknown")
             category = vendor.get("service_category", "Unknown")
             rating = vendor.get("rating", 0)
             location = vendor.get("business_address", "Location not specified")
-            
+            match_score = vendor.get("match_score")
+            match_reason = vendor.get("match_reason", "")
+
             response += f"{i}. **{name}** ({category})\n"
+
+            if match_score is not None:
+                response += f"   🎯 **{match_score}% Match**\n"
+                if match_reason:
+                    response += f"   _{match_reason}_\n"
+
             response += f"   Rating: {rating}/5 ⭐\n"
             response += f"   Location: {location}\n"
 
             recommended = vendor.get("_recommended_package")
             if recommended:
                 pkg_name = recommended.get("name", "Package")
-                pkg_price = recommended.get("price", 0)
+                pkg_price = _safe_float(recommended.get("price", 0), 0.0)
                 pkg_desc = recommended.get("description", "")
                 tier = recommended.get("tier", "Standard")
                 tier_label = "✨ Premium package" if tier == "Premium" else "Recommended package"
@@ -1064,12 +1273,12 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
                     response += f"     {pkg_desc}\n"
 
             response += "\n"
-        
+
         if len(vendors) > 5:
             response += f"...and {len(vendors) - 5} more vendors.\n"
-        
+
         response += "Would you like more details about any of these vendors, or would you like to refine your search?"
-        
+
         return response
 
     # string and object conflict was coming 
@@ -1273,24 +1482,33 @@ Be friendly, professional, and concise. Use Pakistani context when relevant."""
                 "type": "general"
             }
         
-        try:
-            completion = self.client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages,
-                temperature=0.7,
-                max_tokens=1024,
-                top_p=1,
-                stream=False                
-            )   
-            response = completion.choices[0].message.content
+        models = ["llama-3.3-70b-versatile", "groq/compound", "openai/gpt-oss-120b"]
+        completion = None
+        last_err = None
+        for m in models:
+            try:
+                completion = self.client.chat.completions.create(
+                    model=m,
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=1024,
+                    top_p=1,
+                    stream=False                
+                )
+                if completion and completion.choices:
+                    break
+            except Exception as e:
+                last_err = e
+                continue
 
+        if completion and completion.choices:
             return {
-                "response": response,
+                "response": completion.choices[0].message.content,
                 "type": "general"
             }
-        except Exception as e:
-            print(f" Groq API error: {e}")
-            return {
-                "response": "I can help you with vendor searches, bookings, reviews, and favorites. For vendor search, just tell me what type of vendor you're looking for (e.g., 'photographer', 'caterer', 'mehndi artist'). For your data, ask about 'my bookings', 'my reviews', or 'my favorites'.",
-                "type": "error"
-            }
+
+        print(f" Groq API error across all models: {last_err}")
+        return {
+            "response": "I can help you with vendor searches, bookings, reviews, and favorites. For vendor search, just tell me what type of vendor you're looking for (e.g., 'photographer', 'caterer', 'mehndi artist'). For your data, ask about 'my bookings', 'my reviews', or 'my favorites'.",
+            "type": "error"
+        }

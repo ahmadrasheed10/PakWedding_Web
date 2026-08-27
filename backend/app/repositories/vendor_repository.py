@@ -44,6 +44,25 @@ class VendorRepository(BaseRepository):
             skip, 
             limit
         )
+
+    async def get_match_report_candidates(self, category: str, limit: int = 50):
+        """
+        Fetch ALL active/approved vendors in the given category — no city, budget,
+        rating, or date filters applied.  Used exclusively by the Match Report flow
+        so that every vendor in the category can be scored against user preferences
+        rather than pre-filtered out before scoring starts.
+        """
+        import re as _re
+        return await self.find_many(
+            {
+                "service_category": {"$regex": f"^{_re.escape(category.strip())}$", "$options": "i"},
+                "is_approved": True,
+                "is_active": True,
+            },
+            skip=0,
+            limit=limit,
+        )
+
     
     async def get_pending_approvals(self, skip: int = 0, limit: int = 100):
         return await self.find_many({"is_approved": False, "is_active": True}, skip, limit)

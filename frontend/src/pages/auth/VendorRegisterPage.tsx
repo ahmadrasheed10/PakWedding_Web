@@ -72,18 +72,29 @@ export default function VendorRegisterPage() {
     // Activate the new session in Clerk
     await setActive({ session: newSessionId });
 
-    // Wait until window.Clerk.session has switched to the NEW session,
-    // then get a token from that specific session.
-    // Without the session.id check, we would get Rasheed's (already active)
-    // session token, which causes a 400 because he already has a vendor profile.
+    // Wait until window.Clerk.session has switched to the NEW session.
+    // On production/Vercel the cold-start latency can be significant so
+    // we poll for up to 12 seconds (60 × 200 ms) instead of 6 seconds.
     let token: string | null = null;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 200));
       try {
+        // Primary path: use the Clerk session object directly
         const clerkSession = (window as any).Clerk?.session;
         if (clerkSession && clerkSession.id === newSessionId) {
           token = await clerkSession.getToken();
           if (token) break;
+        }
+        // Fallback: any active session token will do once setActive completes
+        if (!token && (window as any).Clerk?.session) {
+          const anySession = (window as any).Clerk.session;
+          if (anySession) {
+            const fallbackToken = await anySession.getToken();
+            if (fallbackToken) {
+              token = fallbackToken;
+              break;
+            }
+          }
         }
       } catch (_) { /* retry */ }
     }

@@ -1,6 +1,7 @@
 import { ReactNode, useEffect } from 'react'
 import Navbar from './Navbar'
 import Footer from './Footer'
+import Chatbot from './Chatbot'
 import { useAuthStore } from '../store/authStore'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '@clerk/clerk-react'
@@ -141,6 +142,7 @@ export default function Layout({ children }: LayoutProps) {
       <main className="flex-grow">
         {children}
       </main>
+      <Chatbot />
       {!hideHeaderFooter && <Footer />}
     </div>
   )
