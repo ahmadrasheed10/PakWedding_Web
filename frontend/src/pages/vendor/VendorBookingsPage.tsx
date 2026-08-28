@@ -169,6 +169,15 @@ export default function VendorBookingsPage() {
                       <div>
                         <p className="text-sm text-gray-600">Event Date</p>
                         <p className="font-semibold text-gray-900">{formatDate(booking.event_date)}</p>
+                        {booking.time_slot && (
+                          <span className={`inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-xs font-semibold ${
+                            booking.time_slot === '1-4'
+                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                              : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                          }`}>
+                            {booking.time_slot === '1-4' ? '🌞 1:00 PM – 4:00 PM' : '🌙 7:00 PM – 10:00 PM'}
+                          </span>
+                        )}
                       </div>
                       <div>
                         <p className="text-sm text-gray-600">Location</p>

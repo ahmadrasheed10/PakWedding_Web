@@ -105,7 +105,7 @@ async def get_vendor_bookings(
                 formatted_booking["created_at"] = datetime.utcnow()
             
             allowed_fields = {
-                "id", "user_id", "vendor_id", "service_id", "package_name", "event_date", 
+                "id", "user_id", "vendor_id", "service_id", "package_name", "event_date", "time_slot",
                 "event_location", "guest_count", "special_requirements", 
                 "total_amount", "status", "created_at"
             }

@@ -218,6 +218,15 @@ export default function BookingHistoryPage() {
                     <div className="grid md:grid-cols-3 gap-4 text-sm text-gray-600">
                       <div>
                         <span className="font-semibold text-gray-700">Event Date:</span> {formatDate(booking.event_date)}
+                        {booking.time_slot && (
+                          <span className={`inline-flex items-center gap-1 ml-2 px-2 py-0.5 rounded-full text-xs font-semibold ${
+                            booking.time_slot === '1-4'
+                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                              : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                          }`}>
+                            {booking.time_slot === '1-4' ? '🌞 1–4 PM' : '🌙 7–10 PM'}
+                          </span>
+                        )}
                       </div>
                       <div>
                         <span className="font-semibold text-gray-700">Location:</span> {booking.event_location}
