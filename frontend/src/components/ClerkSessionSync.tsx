@@ -55,7 +55,10 @@ export default function ClerkSessionSync() {
           if (!syncedRef.current) {
             syncedRef.current = true
             try {
-              const apiBase = import.meta.env.VITE_API_URL || '/api'
+              let apiBase = (import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '/api' : 'http://localhost:8000/api')).replace(/\/+$/, '')
+              if (!apiBase.endsWith('/api') && !apiBase.includes('/api')) {
+                apiBase = `${apiBase}/api`
+              }
               const res = await fetch(`${apiBase}/users/me`, {
                 headers: { Authorization: `Bearer ${token}` },
               })
@@ -71,7 +74,7 @@ export default function ClerkSessionSync() {
                 setAuth(syncedUser, token)
               }
             } catch (backendErr) {
-              // Backend might be offline — keep the optimistic local state
+              // Backend might be offline or loading — keep the optimistic local state
               console.warn('[ClerkSessionSync] Backend sync failed, using local state:', backendErr)
             }
           }

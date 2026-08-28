@@ -110,6 +110,7 @@ export default function VendorRegisterPage() {
       phone_number: formData.phone_number,
       business_address: formData.business_address,
       service_category: formData.service_category,
+      password: formData.password,
     }
 
     const registerResponse = await api.post('/vendors/register', vendorData, {
@@ -120,8 +121,14 @@ export default function VendorRegisterPage() {
       try {
         const imageFormData = new FormData()
         imageFormData.append('file', imageFile)
+        await api.post('/uploads/vendor-image', imageFormData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            Authorization: `Bearer ${token}`
+          }
+        })
       } catch (imgErr) {
-        console.error('Image upload failed:', imgErr)
+        console.warn('Image upload failed (can be uploaded later from dashboard):', imgErr)
       }
     }
 

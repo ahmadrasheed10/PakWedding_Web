@@ -28,6 +28,16 @@ export default function LoginPage() {
   const { user: clerkUser } = useUser()
   const { isLoaded: authLoaded, isSignedIn } = useAuth()
 
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [emailError, setEmailError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [pendingSecondFactor, setPendingSecondFactor] = useState(false)
+  const [secondFactorCode, setSecondFactorCode] = useState('')
+  const [secondFactorStrategy, setSecondFactorStrategy] = useState('email_code')
+  const [secondFactorTarget, setSecondFactorTarget] = useState('')
+
   useEffect(() => {
     if (!authLoaded) return
 
@@ -42,11 +52,93 @@ export default function LoginPage() {
       }
     }
   }, [authLoaded, isSignedIn, clerkUser])
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [emailError, setEmailError] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const handleVerifySecondFactor = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    if (!signIn || !secondFactorCode.trim()) {
+      setError('Please enter the verification code')
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const result = await signIn.attemptSecondFactor({
+        strategy: (secondFactorStrategy as any) || 'email_code',
+        code: secondFactorCode.trim(),
+      })
+
+      if (result.status === 'complete' && result.createdSessionId) {
+        await setActive({ session: result.createdSessionId })
+
+        let token: string | null = null
+        for (let i = 0; i < 30; i++) {
+          try {
+            token = await (window as any).Clerk?.session?.getToken()
+            if (token) break
+          } catch (e) {}
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+
+        const clerkUserObj = (window as any).Clerk?.user || (result as any)?.userData
+        const role = (clerkUserObj?.publicMetadata?.role as string) || (clerkUserObj?.unsafeMetadata?.role as string) || 'user'
+        const fullName = `${clerkUserObj?.firstName || ''} ${clerkUserObj?.lastName || ''}`.trim() || 'User'
+        
+        let authenticatedUser = {
+          id: clerkUserObj?.id || result.createdSessionId,
+          email: email.trim(),
+          full_name: fullName,
+          role: role
+        }
+
+        if (token) {
+          try {
+            let apiBase = (import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '/api' : 'http://localhost:8000/api')).replace(/\/+$/, '')
+            if (!apiBase.endsWith('/api') && !apiBase.includes('/api')) {
+              apiBase = `${apiBase}/api`
+            }
+            const res = await fetch(`${apiBase}/users/me`, {
+              headers: { Authorization: `Bearer ${token}` }
+            })
+            if (res.ok) {
+              const backendUser = await res.json()
+              authenticatedUser = {
+                id: backendUser.id || authenticatedUser.id,
+                email: backendUser.email || authenticatedUser.email,
+                full_name: backendUser.full_name || authenticatedUser.full_name,
+                role: backendUser.role || authenticatedUser.role
+              }
+            }
+          } catch (e) {
+            console.warn('Backend user profile fetch failed:', e)
+          }
+          useAuthStore.getState().setAuth(authenticatedUser, token)
+        }
+
+        showSuccess(`Welcome back, ${authenticatedUser.full_name}!`)
+        setTimeout(() => {
+          if (authenticatedUser.role === 'vendor') {
+            window.location.href = '/vendor/dashboard'
+          } else if (authenticatedUser.role === 'admin') {
+            window.location.href = '/admin/dashboard'
+          } else {
+            window.location.href = '/dashboard'
+          }
+        }, 600)
+        return
+      }
+
+      showError('Verification incomplete. Please check the code and try again.')
+      setError('Verification incomplete. Please check the code and try again.')
+    } catch (err: unknown) {
+      console.error('[2FA ERROR]', err)
+      const clerkError = getClerkErrorMessage(err, 'Verification failed. Please check the code.')
+      showError(clerkError)
+      setError(clerkError)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -113,46 +205,209 @@ export default function LoginPage() {
         backendErrorMessage = (backendErr as any)?.response?.data?.detail || (backendErr as any)?.message || ''
       }
 
-      const result = await signIn.create({
+      console.log('[LOGIN] Attempting Clerk signIn with email:', email.trim())
+      let signInAttempt = await signIn.create({
         identifier: email.trim(),
         password,
       })
 
-      if (result.status === 'complete' && result.createdSessionId) {
-        await setActive({ session: result.createdSessionId })
-        await waitForAuthSync()
+      console.log('[LOGIN] Initial Clerk status:', signInAttempt?.status)
 
-        const user = useAuthStore.getState().user
-        if (user) {
-          showSuccess(`Welcome back, ${user.full_name}!`)
-          setTimeout(() => {
-            if (user.role === 'vendor') {
-              window.location.href = '/vendor/dashboard'
-            } else if (user.role === 'admin') {
-              window.location.href = '/admin/dashboard'
-            } else {
-              window.location.href = '/dashboard'
+      if (signInAttempt.status === 'needs_first_factor') {
+        console.log('[LOGIN] Attempting first factor password strategy...')
+        signInAttempt = await signInAttempt.attemptFirstFactor({
+          strategy: 'password',
+          password,
+        })
+        console.log('[LOGIN] First factor result status:', signInAttempt?.status)
+      }
+
+      if (signInAttempt.status === 'needs_second_factor') {
+        console.log('[LOGIN] Account requires second factor. Supported factors:', signInAttempt.supportedSecondFactors)
+        const factors = signInAttempt.supportedSecondFactors || []
+        const emailFactor = factors.find((f: any) => f.strategy === 'email_code')
+        const phoneFactor = factors.find((f: any) => f.strategy === 'phone_code')
+        const totpFactor = factors.find((f: any) => f.strategy === 'totp')
+
+        const selectedFactor = emailFactor || phoneFactor || totpFactor || factors[0]
+        const strategy = selectedFactor?.strategy || 'email_code'
+        const target = (selectedFactor as any)?.safeIdentifier || email.trim()
+
+        setSecondFactorStrategy(strategy)
+        setSecondFactorTarget(target)
+
+        if (strategy === 'email_code' || strategy === 'phone_code') {
+          try {
+            await signIn.prepareSecondFactor({ strategy: strategy as any })
+            showSuccess(`Verification code sent to ${target}`)
+          } catch (prepErr) {
+            console.warn('prepareSecondFactor notice:', prepErr)
+          }
+        }
+
+        setPendingSecondFactor(true)
+        setIsSubmitting(false)
+        return
+      }
+
+      if (signInAttempt.status === 'complete' && signInAttempt.createdSessionId) {
+        await setActive({ session: signInAttempt.createdSessionId })
+
+        // Retrieve token directly
+        let token: string | null = null
+        for (let i = 0; i < 30; i++) {
+          try {
+            token = await (window as any).Clerk?.session?.getToken()
+            if (token) break
+          } catch (e) {}
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+
+        const clerkUserObj = (window as any).Clerk?.user || (signInAttempt as any)?.userData
+        const role = (clerkUserObj?.publicMetadata?.role as string) || (clerkUserObj?.unsafeMetadata?.role as string) || 'user'
+        const fullName = `${clerkUserObj?.firstName || ''} ${clerkUserObj?.lastName || ''}`.trim() || 'User'
+        
+        let authenticatedUser = {
+          id: clerkUserObj?.id || signInAttempt.createdSessionId,
+          email: email.trim(),
+          full_name: fullName,
+          role: role
+        }
+
+        if (token) {
+          try {
+            let apiBase = (import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '/api' : 'http://localhost:8000/api')).replace(/\/+$/, '')
+            if (!apiBase.endsWith('/api') && !apiBase.includes('/api')) {
+              apiBase = `${apiBase}/api`
             }
-          }, 1000)
+            const res = await fetch(`${apiBase}/users/me`, {
+              headers: { Authorization: `Bearer ${token}` }
+            })
+            if (res.ok) {
+              const backendUser = await res.json()
+              authenticatedUser = {
+                id: backendUser.id || authenticatedUser.id,
+                email: backendUser.email || authenticatedUser.email,
+                full_name: backendUser.full_name || authenticatedUser.full_name,
+                role: backendUser.role || authenticatedUser.role
+              }
+            }
+          } catch (e) {
+            console.warn('Backend user profile fetch failed, using Clerk metadata:', e)
+          }
+          useAuthStore.getState().setAuth(authenticatedUser, token)
+        }
+
+        showSuccess(`Welcome back, ${authenticatedUser.full_name}!`)
+        setTimeout(() => {
+          if (authenticatedUser.role === 'vendor') {
+            window.location.href = '/vendor/dashboard'
+          } else if (authenticatedUser.role === 'admin') {
+            window.location.href = '/admin/dashboard'
+          } else {
+            window.location.href = '/dashboard'
+          }
+        }, 600)
+        return
+      }
+
+      console.warn('[LOGIN] Unhandled signIn status:', signInAttempt?.status)
+      showError('Login failed. Please check your credentials.')
+      setError('Login failed. Please check your credentials.')
+    } catch (err: unknown) {
+      console.error('[LOGIN ERROR]', err)
+      
+      // If a session already exists in Clerk, activate it and redirect
+      if ((err as any)?.errors?.[0]?.code === 'session_exists') {
+        const activeSession = (window as any).Clerk?.session
+        if (activeSession) {
+          showSuccess('Already signed in. Redirecting...')
+          const clerkUserObj = (window as any).Clerk?.user
+          const role = (clerkUserObj?.publicMetadata?.role as string) || (clerkUserObj?.unsafeMetadata?.role as string) || 'user'
+          setTimeout(() => {
+            if (role === 'vendor') window.location.href = '/vendor/dashboard'
+            else if (role === 'admin') window.location.href = '/admin/dashboard'
+            else window.location.href = '/dashboard'
+          }, 500)
           return
         }
       }
 
-      if (backendErrorMessage) {
-        showError(backendErrorMessage)
-        setError(backendErrorMessage)
-      } else {
-        showError('Login failed. Please check your credentials.')
-        setError('Login failed. Please check your credentials.')
-      }
-    } catch (err: unknown) {
       const clerkError = getClerkErrorMessage(err, '')
-      const errorMsg = backendErrorMessage || clerkError || 'Login failed. Please check your credentials.'
+      const errorMsg = clerkError || backendErrorMessage || 'Login failed. Please check your credentials.'
       showError(errorMsg)
       setError(errorMsg)
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  // Second Factor Verification View
+  if (pendingSecondFactor) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50/30 to-red-50/20 flex items-center justify-center py-6 sm:py-12 px-4">
+        <div className="max-w-md w-full bg-white rounded-lg shadow-xl p-6 sm:p-8 border-2 border-rose-100 hover:border-primary-200 transition-all duration-300">
+          <div className="text-center mb-6">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Two-Factor Authentication</h2>
+            <p className="text-gray-600 text-sm">
+              We sent a verification code to <span className="font-semibold text-gray-900">{secondFactorTarget || email}</span>. Enter it below to complete your login.
+            </p>
+          </div>
+
+          {error && (
+            <div className="bg-red-50 border-2 border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 text-sm">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleVerifySecondFactor} className="space-y-4 sm:space-y-5">
+            <div>
+              <label className="block text-gray-700 font-medium mb-2 text-sm sm:text-base">Verification Code</label>
+              <input
+                type="text"
+                value={secondFactorCode}
+                onChange={(e) => {
+                  setSecondFactorCode(e.target.value)
+                  setError('')
+                }}
+                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all duration-300 text-center text-xl tracking-widest font-mono"
+                placeholder="123456"
+                required
+                maxLength={6}
+                autoFocus
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmitting || !secondFactorCode.trim()}
+              className="w-full bg-gradient-to-r from-primary-600 via-accent-600 to-primary-600 hover:from-primary-700 hover:via-accent-700 hover:to-primary-700 text-white py-2.5 sm:py-3 rounded-lg font-semibold transition-all duration-300 shadow-lg hover:shadow-xl hover:shadow-primary-600/50 transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none text-sm sm:text-base"
+            >
+              {isSubmitting ? 'Verifying...' : 'Verify & Login'}
+            </button>
+
+            <div className="text-center pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingSecondFactor(false)
+                  setSecondFactorCode('')
+                  setError('')
+                }}
+                className="text-sm text-gray-500 hover:text-gray-700 underline"
+              >
+                Back to login
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -222,3 +477,4 @@ export default function LoginPage() {
     </div>
   )
 }
+

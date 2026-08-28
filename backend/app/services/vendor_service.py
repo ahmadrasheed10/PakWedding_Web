@@ -16,52 +16,104 @@ class VendorService:
         self.user_repo = user_repository
     
     async def register_vendor(self, vendor_data: VendorCreate, clerk_user: Optional[dict] = None) -> dict:
-        existing_user = await self.user_repo.get_by_email(vendor_data.email)
+        email_clean = (vendor_data.email or "").strip().lower()
+        existing_user = await self.user_repo.get_by_email(email_clean)
+        if not existing_user and vendor_data.email:
+            existing_user = await self.user_repo.get_by_email(vendor_data.email.strip())
+
+        hashed_pw = None
+        if vendor_data.password:
+            try:
+                hashed_pw = hash_password(vendor_data.password)
+            except Exception:
+                pass
+
+        user = None
 
         if clerk_user:
-            if existing_user and str(existing_user.get("_id")) != str(clerk_user.get("_id")):
-                raise ValueError("User with this email already exists")
-
             user = clerk_user
-            if user.get("role") != "vendor":
-                await self.user_repo.update(str(user["_id"]), {
+            # If a user with the same email exists in MongoDB under a different record, link them
+            if existing_user and str(existing_user.get("_id")) != str(clerk_user.get("_id")):
+                clerk_id = clerk_user.get("clerk_id") or clerk_user.get("sub")
+                updates = {
+                    "role": "vendor",
+                    "full_name": vendor_data.contact_person,
+                    "phone_number": vendor_data.phone_number,
+                    "updated_at": datetime.utcnow()
+                }
+                if clerk_id:
+                    updates["clerk_id"] = clerk_id
+                if hashed_pw and not existing_user.get("hashed_password"):
+                    updates["hashed_password"] = hashed_pw
+                await self.user_repo.update(str(existing_user["_id"]), updates)
+                user = await self.user_repo.get_by_id(str(existing_user["_id"]))
+            else:
+                updates = {
                     "role": "vendor",
                     "full_name": vendor_data.contact_person,
                     "phone_number": vendor_data.phone_number,
                     "updated_at": datetime.utcnow(),
-                })
+                }
+                if hashed_pw and not user.get("hashed_password"):
+                    updates["hashed_password"] = hashed_pw
+                await self.user_repo.update(str(user["_id"]), updates)
                 user = await self.user_repo.get_by_id(str(user["_id"]))
+        elif existing_user:
+            # User already exists (e.g. registered in Clerk and synced)
+            user = existing_user
+            updates = {
+                "role": "vendor",
+                "full_name": vendor_data.contact_person,
+                "phone_number": vendor_data.phone_number,
+                "updated_at": datetime.utcnow(),
+            }
+            if hashed_pw and not user.get("hashed_password"):
+                updates["hashed_password"] = hashed_pw
+            await self.user_repo.update(str(user["_id"]), updates)
+            user = await self.user_repo.get_by_id(str(user["_id"]))
         else:
-            if existing_user:
-                raise ValueError("User with this email already exists")
-
             if not vendor_data.password:
-                raise ValueError("Password is required for vendor registration")
-
-            strength, issues, is_valid = validate_password_strength(vendor_data.password)
-            if not is_valid:
-                error_message = "Password is too weak. " + "; ".join(issues)
-                raise ValidationException(detail=error_message)
+                hashed_pw = None
+            else:
+                strength, issues, is_valid = validate_password_strength(vendor_data.password)
+                if not is_valid:
+                    error_message = "Password is too weak. " + "; ".join(issues)
+                    raise ValidationException(detail=error_message)
+                hashed_pw = hash_password(vendor_data.password)
 
             user_dict = {
-                "email": vendor_data.email,
+                "email": email_clean,
                 "full_name": vendor_data.contact_person,
                 "phone_number": vendor_data.phone_number,
                 "role": "vendor",
-                "hashed_password": hash_password(vendor_data.password),
+                "hashed_password": hashed_pw,
                 "is_active": True,
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
             }
             user = await self.user_repo.create(user_dict)
 
-        existing_vendor = await self.vendor_repo.get_by_user_id(user["_id"])
+        existing_vendor = await self.vendor_repo.get_by_user_id(str(user["_id"]))
+        if not existing_vendor:
+            existing_vendor = await self.vendor_repo.find_one({"email": email_clean})
+
         if existing_vendor:
-            raise ValueError("Vendor profile already exists for this account")
-        
+            # If vendor profile already exists for this account, update and return it
+            update_data = {
+                "business_name": vendor_data.business_name,
+                "contact_person": vendor_data.contact_person,
+                "phone_number": vendor_data.phone_number,
+                "business_address": vendor_data.business_address,
+                "service_category": vendor_data.service_category,
+                "user_id": str(user["_id"]),
+                "updated_at": datetime.utcnow()
+            }
+            updated_vendor = await self.vendor_repo.update(str(existing_vendor["_id"]), update_data)
+            return updated_vendor or existing_vendor
         
         vendor_dict = vendor_data.model_dump(exclude={"password"})
-        vendor_dict["user_id"] = user["_id"]
+        vendor_dict["email"] = email_clean
+        vendor_dict["user_id"] = str(user["_id"])
         vendor_dict["is_approved"] = False  
         vendor_dict["is_active"] = True  
         vendor_dict["created_at"] = datetime.utcnow()

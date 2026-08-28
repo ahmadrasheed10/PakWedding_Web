@@ -12,21 +12,27 @@ _jwks_cache = None
 _jwks_cache_time = None
 
 
-def get_jwks_sync():
+def get_jwks_sync(jwks_url: Optional[str] = None):
     """Fetch the JWKS from Clerk in a synchronous context with caching."""
     global _jwks_cache, _jwks_cache_time
+    url = jwks_url or settings.CLERK_JWKS_URL
+    if not url:
+        return None
+    if not url.endswith("/jwks.json") and not url.endswith("/.well-known/jwks.json"):
+        url = url.rstrip("/") + "/.well-known/jwks.json"
+
     now = datetime.now(timezone.utc)
     if _jwks_cache and _jwks_cache_time and (now - _jwks_cache_time) < timedelta(hours=1):
         return _jwks_cache
 
     try:
-        response = httpx.get(settings.CLERK_JWKS_URL, timeout=5.0)
+        response = httpx.get(url, timeout=7.0)
         response.raise_for_status()
         _jwks_cache = response.json()
         _jwks_cache_time = now
         return _jwks_cache
     except Exception as e:
-        print(f"[AUTH ERROR] Failed to fetch JWKS: {e}")
+        print(f"[AUTH ERROR] Failed to fetch JWKS from {url}: {e}")
         return None
 
 
@@ -68,7 +74,17 @@ def _decode_clerk_token(token: str) -> Optional[dict]:
         if not kid:
             return None
 
-        jwks = get_jwks_sync()
+        # Derive JWKS URL from token issuer if available
+        jwks_url = None
+        try:
+            unverified_payload = jwt.decode(token, options={"verify_signature": False})
+            iss = unverified_payload.get("iss")
+            if iss and ("clerk" in iss or "accounts.dev" in iss):
+                jwks_url = f"{iss.rstrip('/')}/.well-known/jwks.json"
+        except Exception:
+            pass
+
+        jwks = get_jwks_sync(jwks_url)
         if not jwks:
             return None
 

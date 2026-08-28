@@ -189,7 +189,6 @@ async def get_session(
             detail="Failed to get session"
         )
 
-
 @router.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: str,

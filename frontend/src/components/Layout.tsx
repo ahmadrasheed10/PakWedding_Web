@@ -136,13 +136,19 @@ export default function Layout({ children }: LayoutProps) {
   const isAuthenticated = !!(token || isSignedIn) && !!user
   const hideHeaderFooter = isAuthenticated && (isUserSection || isVendorSection || isAdminSection)
 
+  const shouldShowChatbot =
+    user?.role !== 'vendor' &&
+    user?.role !== 'admin' &&
+    !isVendorSection &&
+    !isAdminSection
+
   return (
     <div className="min-h-screen flex flex-col">
       {!hideHeaderFooter && <Navbar />}
       <main className="flex-grow">
         {children}
       </main>
-      <Chatbot />
+      {shouldShowChatbot && <Chatbot />}
       {!hideHeaderFooter && <Footer />}
     </div>
   )

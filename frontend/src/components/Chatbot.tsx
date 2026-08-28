@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import api from '../services/api'
 import { useAuthStore } from '../store/authStore'
 
@@ -367,6 +368,9 @@ function MatchReportModal({
 // ─── Main Chatbot ─────────────────────────────────────────────────────────────
 
 export default function Chatbot() {
+  const user = useAuthStore((state) => state.user)
+  const location = useLocation()
+
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: "Hi! I'm your wedding planning assistant. I can help you find vendors, check your bookings, reviews, and favorites. How can I assist you today?" }
@@ -382,7 +386,6 @@ export default function Chatbot() {
   const [reportModalData, setReportModalData] = useState<{ vendors: any[]; collectedInfo: any } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const user = useAuthStore((state) => state.user)
 
   const categories = [
     { id: 'Photography', name: 'Photography', icon: '' },
@@ -577,7 +580,19 @@ export default function Chatbot() {
     }
   }
 
-  if (!user) return null
+  const isVendorRoute = location.pathname === '/vendor' || location.pathname.startsWith('/vendor/')
+  const isAdminRoute = location.pathname === '/admin' || location.pathname.startsWith('/admin/')
+
+  // Hide AI assistant on vendor/admin portals and for vendor/admin roles
+  if (
+    !user ||
+    user.role === 'vendor' ||
+    user.role === 'admin' ||
+    isVendorRoute ||
+    isAdminRoute
+  ) {
+    return null
+  }
 
   return (
     <>

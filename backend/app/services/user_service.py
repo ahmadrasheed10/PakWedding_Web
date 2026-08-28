@@ -23,29 +23,42 @@ class UserService:
         if not clerk_id:
             return None
 
-        # Return immediately if we already have a record for this Clerk user
+        email = (clerk_user_data.get("email") or "").lower().strip()
+        desired_role = clerk_user_data.get("role") or "user"
+
+        # Return immediately if we already have a record for this Clerk user, updating if needed
         existing_user = await self.get_user_by_clerk_id(clerk_id)
         if existing_user:
+            updates = {}
+            if email and not existing_user.get("email"):
+                updates["email"] = email
+            if desired_role != "user" and existing_user.get("role") == "user":
+                updates["role"] = desired_role
+            if updates:
+                updates["updated_at"] = datetime.utcnow()
+                await self.user_repo.update(str(existing_user["_id"]), updates)
+                existing_user.update(updates)
             return existing_user
-
-        email = (clerk_user_data.get("email") or "").lower().strip()
 
         # If a MongoDB user already exists with the same email, link the Clerk id
         if email:
             existing_email_user = await self.user_repo.get_by_email(email)
             if existing_email_user:
-                await self.user_repo.update(str(existing_email_user["_id"]), {"clerk_id": clerk_id})
-                existing_email_user["clerk_id"] = clerk_id
+                updates = {"clerk_id": clerk_id}
+                if desired_role != "user" and existing_email_user.get("role") == "user":
+                    updates["role"] = desired_role
+                updates["updated_at"] = datetime.utcnow()
+                await self.user_repo.update(str(existing_email_user["_id"]), updates)
+                existing_email_user.update(updates)
                 return existing_email_user
 
-        role = clerk_user_data.get("role") or "user"
         user_data = {
             "clerk_id": clerk_id,
             "full_name": clerk_user_data.get("full_name") or "Clerk User",
             "email": email,
-            "role": role,
+            "role": desired_role,
             "is_active": True,
-            "is_admin_approved": False if role == "admin" else None,
+            "is_admin_approved": False if desired_role == "admin" else None,
             "hashed_password": None,  # Clerk-only users don't have a local password
             "created_at": clerk_user_data.get("created_at") or datetime.utcnow(),
             "updated_at": datetime.utcnow(),

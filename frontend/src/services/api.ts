@@ -4,7 +4,11 @@ import { useAuthStore } from '../store/authStore'
 // Use proxy in development, direct URL in production
 const getBaseURL = () => {
   if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL
+    let url = import.meta.env.VITE_API_URL.replace(/\/+$/, '')
+    if (!url.endsWith('/api') && !url.includes('/api')) {
+      url = `${url}/api`
+    }
+    return url
   }
   // In development, use proxy if available, otherwise direct URL
   if (import.meta.env.DEV) {
