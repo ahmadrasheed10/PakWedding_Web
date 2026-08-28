@@ -19,6 +19,7 @@ class BookingBase(BaseModel):
     service_id: Optional[str] = None
     package_name: Optional[str] = None
     event_date: datetime
+    time_slot: Optional[str] = Field(None, description="Time slot for the booking: '1-4' (1-4 PM) or '7-10' (7-10 PM)")
     event_location: str
     guest_count: Optional[int] = None
     special_requirements: Optional[str] = None
@@ -30,6 +31,7 @@ class BookingCreateRequest(BaseModel):
     service_id: Optional[str] = None
     package_name: Optional[str] = None
     event_date: datetime
+    time_slot: Optional[str] = Field("1-4", description="Time slot for the booking: '1-4' (1-4 PM) or '7-10' (7-10 PM)")
     event_location: str
     guest_count: Optional[int] = None
     special_requirements: Optional[str] = None
@@ -42,6 +44,7 @@ class BookingCreate(BookingBase):
 
 class BookingUpdate(BaseModel):
     event_date: Optional[datetime] = None
+    time_slot: Optional[str] = None
     event_location: Optional[str] = None
     guest_count: Optional[int] = None
     special_requirements: Optional[str] = None
@@ -63,6 +66,7 @@ class BookingResponse(BookingBase):
     status: BookingStatus
     created_at: datetime
     package_name: Optional[str] = None
+    time_slot: Optional[str] = None
     
     class Config:
         from_attributes = True

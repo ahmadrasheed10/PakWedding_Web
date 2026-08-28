@@ -5,6 +5,7 @@ import { fetchVendorById, Vendor } from '../../services/vendorService'
 import BookingModal from '../../components/BookingModal'
 import { useAuthStore } from '../../store/authStore'
 import MapView from '../../components/MapView'
+import VendorAvailabilityCalendar from '../../components/VendorAvailabilityCalendar'
 
 export default function VendorProfilePage() {
   const { id } = useParams()
@@ -360,6 +361,33 @@ useEffect(() => {
             </div>
           </div>
         )}
+
+        {/* Vendor Availability Calendar */}
+        <div className="mb-8">
+          <div className="text-center mb-6">
+            <h2 className="text-2xl font-extrabold bg-gradient-to-r from-gray-900 via-primary-600 to-gray-900 bg-clip-text text-transparent mb-2">
+              📅 Availability Calendar
+            </h2>
+            <p className="text-gray-600 text-sm">Check available dates and time slots before booking</p>
+          </div>
+          <div className="bg-white rounded-xl shadow-lg p-6 border-2 border-rose-100/50 hover:border-primary-200 transition-all duration-300">
+            <VendorAvailabilityCalendar vendorId={vendorId} readOnly />
+            <div className="mt-4 flex items-center justify-center gap-6 text-xs text-gray-500">
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full bg-green-100 border border-green-300 inline-block"></span>
+                Available
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full bg-red-100 border border-red-300 inline-block"></span>
+                Booked
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full bg-yellow-100 border border-yellow-300 inline-block"></span>
+                Partially Booked
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* Gallery Images Section */}
         {galleryImages.length > 0 && (

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { createBooking, BookingCreate } from '../services/bookingService'
+import { createBooking, BookingCreate, TimeSlot } from '../services/bookingService'
 import { fetchVendorById, Package } from '../services/vendorService'
 import { useAuthStore } from '../store/authStore'
+import VendorAvailabilityCalendar from './VendorAvailabilityCalendar'
 
 interface BookingModalProps {
   vendorId: string
@@ -16,8 +17,13 @@ export default function BookingModal({ vendorId, vendorName, isOpen, onClose, on
   const [packages, setPackages] = useState<Package[]>([])
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(null)
   const [loadingPackages, setLoadingPackages] = useState(false)
+  const [selectedDate, setSelectedDate] = useState<string>(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    return d.toISOString().split('T')[0]
+  })
+  const [selectedSlot, setSelectedSlot] = useState<TimeSlot>('1-4')
   const [formData, setFormData] = useState({
-    event_date: '',
     event_location: '',
     guest_count: '',
     special_requirements: '',
@@ -81,6 +87,12 @@ export default function BookingModal({ vendorId, vendorName, isOpen, onClose, on
     setFormData(prev => ({ ...prev, total_amount: pkg.price.toString() }))
   }
 
+  const handleSlotSelection = (date: string, slot: TimeSlot) => {
+    setSelectedDate(date)
+    setSelectedSlot(slot)
+    setError('')
+  }
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setFormData({
       ...formData,
@@ -117,8 +129,14 @@ export default function BookingModal({ vendorId, vendorName, isOpen, onClose, on
       }
 
       // Validate required fields
-      if (!formData.event_date || !formData.event_location) {
-        setError('Please fill in all required fields (Event Date and Location)')
+      if (!selectedDate || !selectedSlot) {
+        setError('Please select a date and an available time slot from the calendar.')
+        setLoading(false)
+        return
+      }
+
+      if (!formData.event_location.trim()) {
+        setError('Please enter the event location venue address.')
         setLoading(false)
         return
       }
@@ -134,7 +152,8 @@ export default function BookingModal({ vendorId, vendorName, isOpen, onClose, on
       const bookingData: BookingCreate = {
         vendor_id: vendorId,
         package_name: selectedPackage?.name || undefined,
-        event_date: new Date(formData.event_date).toISOString(),
+        event_date: new Date(selectedDate + 'T12:00:00Z').toISOString(),
+        time_slot: selectedSlot,
         event_location: formData.event_location.trim(),
         guest_count: formData.guest_count ? parseInt(formData.guest_count) : undefined,
         special_requirements: formData.special_requirements?.trim() || undefined,
@@ -142,9 +161,6 @@ export default function BookingModal({ vendorId, vendorName, isOpen, onClose, on
       }
 
       console.log('Creating booking with data:', bookingData)
-      console.log('Token present:', !!token)
-      console.log('User:', currentUser)
-      
       const result = await createBooking(bookingData)
       console.log('Booking created successfully:', result)
       
@@ -153,7 +169,6 @@ export default function BookingModal({ vendorId, vendorName, isOpen, onClose, on
       
       // Reset form
       setFormData({
-        event_date: '',
         event_location: '',
         guest_count: '',
         special_requirements: '',
@@ -161,41 +176,12 @@ export default function BookingModal({ vendorId, vendorName, isOpen, onClose, on
       })
     } catch (err: any) {
       console.error('Booking creation error:', err)
-      console.error('Error response:', err.response)
-      
-      // Handle 401 specifically
-      if (err.response?.status === 401) {
-        setError('Your session has expired. Please login again.')
-      } else if (err.response?.status === 422) {
-        // Handle validation errors from FastAPI/Pydantic
-        const errorData = err.response?.data
-        let errorMessage = 'Validation error: '
-        
-        if (errorData?.detail && Array.isArray(errorData.detail)) {
-          // Pydantic validation errors come as an array
-          const errors = errorData.detail.map((e: any) => {
-            const field = e.loc?.join('.') || 'unknown'
-            return `${field}: ${e.msg}`
-          }).join(', ')
-          errorMessage += errors
-        } else if (errorData?.detail) {
-          // Single error message
-          errorMessage = typeof errorData.detail === 'string' 
-            ? errorData.detail 
-            : JSON.stringify(errorData.detail)
-        } else {
-          errorMessage = 'Invalid booking data. Please check all fields are filled correctly.'
-        }
-        
-        setError(errorMessage)
-      } else {
-        const errorMessage = err.response?.data?.detail 
-          ? (typeof err.response.data.detail === 'string' 
-              ? err.response.data.detail 
-              : JSON.stringify(err.response.data.detail))
-          : err.message || 'Failed to create booking'
-        setError(errorMessage)
-      }
+      const errorMessage = err.response?.data?.detail 
+        ? (typeof err.response.data.detail === 'string' 
+            ? err.response.data.detail 
+            : JSON.stringify(err.response.data.detail))
+        : err.message || 'Failed to create booking'
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }
@@ -278,19 +264,28 @@ export default function BookingModal({ vendorId, vendorName, isOpen, onClose, on
             </div>
           ) : null}
 
+          {/* Availability Calendar & Time Slot Selection */}
           <div>
             <label className="block text-gray-700 font-medium mb-2">
-              Event Date <span className="text-red-500">*</span>
+              Select Date & Time Slot <span className="text-red-500">*</span>
             </label>
-            <input
-              type="datetime-local"
-              name="event_date"
-              value={formData.event_date}
-              onChange={handleChange}
-              min={new Date(new Date().getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#D72626] focus:border-[#D72626]"
-              required
+            <VendorAvailabilityCalendar
+              vendorId={vendorId}
+              selectedDate={selectedDate}
+              selectedSlot={selectedSlot}
+              onSelectSlot={handleSlotSelection}
             />
+            {selectedDate && selectedSlot && (
+              <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800 flex items-center gap-2">
+                <span>{selectedSlot === '1-4' ? '🌞' : '🌙'}</span>
+                <span>
+                  <strong>Selected:</strong>{' '}
+                  {new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-PK', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                  {' — '}
+                  {selectedSlot === '1-4' ? '1:00 PM – 4:00 PM' : '7:00 PM – 10:00 PM'}
+                </span>
+              </div>
+            )}
           </div>
 
           <div>

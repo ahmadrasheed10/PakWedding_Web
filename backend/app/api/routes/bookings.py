@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List
+from typing import List, Optional
 from app.services.booking_service import BookingService
 from app.api.dependencies import get_booking_service, get_current_user, get_vendor_stats_service
 from app.models.booking import BookingCreate, BookingCreateRequest, BookingUpdate, BookingResponse
@@ -22,7 +22,10 @@ async def create_booking(
     
     from app.models.booking import BookingCreate
     booking_create = BookingCreate(**booking_dict)
-    booking = await booking_service.create_booking(booking_create, stats_service)
+    try:
+        booking = await booking_service.create_booking(booking_create, stats_service)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     
     if "_id" in booking:
         booking["id"] = str(booking["_id"])
@@ -36,6 +39,24 @@ async def create_booking(
         booking["service_id"] = str(booking["service_id"])
     
     return booking
+
+
+@router.get("/vendor/{vendor_id}/availability")
+async def get_vendor_availability(
+    vendor_id: str,
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    booking_service: BookingService = Depends(get_booking_service)
+):
+    from datetime import datetime
+    now = datetime.utcnow()
+    target_year = year or now.year
+    target_month = month or now.month
+    
+    if target_month < 1 or target_month > 12:
+        raise HTTPException(status_code=400, detail="Invalid month. Must be between 1 and 12.")
+        
+    return await booking_service.get_vendor_availability(vendor_id, target_year, target_month)
 
 
 @router.get("/my-bookings", response_model=List[BookingResponse])
@@ -87,7 +108,7 @@ async def get_my_bookings(
                 formatted_booking["created_at"] = datetime.utcnow()
             
             allowed_fields = {
-                "id", "user_id", "vendor_id", "service_id", "package_name", "event_date", 
+                "id", "user_id", "vendor_id", "service_id", "package_name", "event_date", "time_slot",
                 "event_location", "guest_count", "special_requirements", 
                 "total_amount", "status", "created_at"
             }
